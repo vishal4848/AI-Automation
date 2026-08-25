@@ -4,6 +4,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { AIGatewayService } from '../ai-gateway/ai-gateway.service';
 import { CloudinaryService } from '../storage/cloudinary.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 describe('ImagesService - Delete Feature & Security', () => {
@@ -47,6 +48,10 @@ describe('ImagesService - Delete Feature & Security', () => {
     recordUsage: jest.fn(),
   };
 
+  const mockNotificationsService = {
+    create: jest.fn().mockResolvedValue({ id: 'notif-1' }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -55,6 +60,7 @@ describe('ImagesService - Delete Feature & Security', () => {
         { provide: AIGatewayService, useValue: mockAiGateway },
         { provide: CloudinaryService, useValue: mockCloudinary },
         { provide: AnalyticsService, useValue: mockAnalytics },
+        { provide: NotificationsService, useValue: mockNotificationsService },
       ],
     }).compile();
 

@@ -3,6 +3,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { AIGatewayService } from '../ai-gateway/ai-gateway.service';
 import { CloudinaryService } from '../storage/cloudinary.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { GenerateImageDto } from './dto/generate-image.dto';
 
 @Injectable()
@@ -14,6 +15,7 @@ export class ImagesService {
     private aiGateway: AIGatewayService,
     private cloudinary: CloudinaryService,
     private analyticsService: AnalyticsService,
+    private notificationsService: NotificationsService,
   ) {}
 
   async generate(userId: string, dto: GenerateImageDto) {
@@ -88,6 +90,14 @@ export class ImagesService {
 
       // Deduct credits
       await this.prisma.user.update({ where: { id: userId }, data: { credits: { decrement: 5 } } });
+
+      // Create live notification
+      await this.notificationsService.create(userId, {
+        type: 'IMAGE_GENERATED',
+        title: 'AI Image Generated',
+        message: `Generated "${dto.prompt.slice(0, 35)}${dto.prompt.length > 35 ? '...' : ''}"`,
+        data: { imageId: savedImage?.id, url: finalUrl, projectId: dto.projectId },
+      });
     } catch (dbErr: any) {
       this.logger.warn(`DB save skipped: ${dbErr.message}`);
     }

@@ -18,7 +18,11 @@ import {
   Share2,
   Folder,
   Calendar,
-  Shield
+  Shield,
+  Image as ImageIcon,
+  Video,
+  Check,
+  Inbox
 } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { useAuthStore } from '@/store/auth-store';
@@ -29,17 +33,78 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { formatDistanceToNow } from 'date-fns';
 
 export function Navbar() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { toggleMobileSidebar } = useAppStore();
   const { user, logout } = useAuthStore();
-  const [unreadNotifications] = useState(3);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on click outside or Escape key
+  // Fetch live real notifications from PostgreSQL database
+  const { data: notificationsData, isLoading: isLoadingNotifs } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: async () => {
+      const res = await fetch('/api/notifications');
+      if (!res.ok) return { notifications: [], total: 0, unreadCount: 0 };
+      const json = await res.json();
+      return {
+        notifications: json.notifications || json.data?.notifications || [],
+        total: json.total !== undefined ? json.total : 0,
+        unreadCount: json.unreadCount !== undefined ? json.unreadCount : 0,
+      };
+    },
+    refetchInterval: 8000, // Live automatic background refresh
+    staleTime: 4000,
+  });
+
+  const notifications: any[] = notificationsData?.notifications || [];
+  const unreadNotifications = notificationsData?.unreadCount || 0;
+
+  // Mark all as read mutation
+  const markAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/notifications/read-all', { method: 'PATCH' });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.setQueryData(['notifications'], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          unreadCount: 0,
+          notifications: (old.notifications || []).map((n: any) => ({ ...n, isRead: true })),
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+
+  // Mark single as read handler
+  const handleItemClick = async (notif: any) => {
+    if (!notif.isRead) {
+      try {
+        await fetch(`/api/notifications/${notif.id}/read`, { method: 'PATCH' });
+        queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      } catch {}
+    }
+
+    if (notif.type === 'IMAGE_GENERATED') {
+      router.push('/content-library');
+    } else if (notif.type === 'PROJECT_CREATED') {
+      router.push('/workspace');
+    } else if (notif.type === 'POST_PUBLISHED' || notif.type === 'POST_SCHEDULED') {
+      router.push('/scheduler');
+    } else if (notif.type === 'ACCOUNT_CONNECTED') {
+      router.push('/social-accounts');
+    }
+  };
+
+  // Close profile dropdown on click outside or Escape key
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
@@ -76,6 +141,51 @@ export function Navbar() {
     } finally {
       setIsLoggingOut(false);
       setIsProfileOpen(false);
+    }
+  };
+
+  const getNotifIcon = (type: string) => {
+    switch (type) {
+      case 'IMAGE_GENERATED':
+        return (
+          <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 mt-0.5">
+            <Sparkles size={14} />
+          </div>
+        );
+      case 'VIDEO_GENERATED':
+        return (
+          <div className="p-1.5 rounded-lg bg-pink-500/10 text-pink-400 mt-0.5">
+            <Video size={14} />
+          </div>
+        );
+      case 'PROJECT_CREATED':
+        return (
+          <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 mt-0.5">
+            <Folder size={14} />
+          </div>
+        );
+      case 'POST_PUBLISHED':
+      case 'POST_SCHEDULED':
+        return (
+          <div className="p-1.5 rounded-lg bg-primary/10 text-primary mt-0.5">
+            <CheckCircle2 size={14} />
+          </div>
+        );
+      default:
+        return (
+          <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 mt-0.5">
+            <Bell size={14} />
+          </div>
+        );
+    }
+  };
+
+  const formatTime = (dateStr?: string | Date) => {
+    if (!dateStr) return 'Recently';
+    try {
+      return formatDistanceToNow(new Date(dateStr), { addSuffix: true });
+    } catch {
+      return 'Recently';
     }
   };
 
@@ -122,10 +232,10 @@ export function Navbar() {
           </div>
         </div>
 
-        {/* Notifications Dropdown */}
+        {/* Live Notifications Dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="relative p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+            className="relative p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors outline-none"
           >
             <Bell size={18} />
             {unreadNotifications > 0 && (
@@ -135,35 +245,73 @@ export function Navbar() {
           <DropdownMenuContent align="end" className="w-80 p-0 rounded-2xl border-white/10 bg-[#111118] shadow-2xl backdrop-blur-xl">
             <div className="p-3 border-b border-white/10 flex items-center justify-between">
               <span className="text-xs font-bold text-foreground">Notifications</span>
-              <Badge variant="secondary" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-none font-semibold">
-                3 New
-              </Badge>
+              <div className="flex items-center gap-2">
+                {unreadNotifications > 0 ? (
+                  <Badge variant="secondary" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-none font-semibold">
+                    {unreadNotifications} New
+                  </Badge>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground font-medium">All caught up</span>
+                )}
+                {unreadNotifications > 0 && (
+                  <button
+                    onClick={() => markAllMutation.mutate()}
+                    disabled={markAllMutation.isPending}
+                    className="text-[10px] text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 font-medium"
+                    title="Mark all as read"
+                  >
+                    <Check size={11} />
+                    <span>Read all</span>
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="divide-y divide-white/5 max-h-72 overflow-y-auto custom-scrollbar">
-              <div className="p-3 hover:bg-white/5 transition-colors cursor-pointer">
-                <div className="flex items-start gap-2.5">
-                  <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 mt-0.5">
-                    <CheckCircle2 size={14} />
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-foreground">AI Video Generated</div>
-                    <div className="text-[11px] text-muted-foreground">Your 4K promo video is ready.</div>
-                    <div className="text-[10px] text-muted-foreground/70 mt-1">2 mins ago</div>
+
+            <div className="divide-y divide-white/5 max-h-80 overflow-y-auto custom-scrollbar">
+              {isLoadingNotifs && (
+                <div className="p-4 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Loading updates...</span>
+                </div>
+              )}
+
+              {!isLoadingNotifs && notifications.length === 0 && (
+                <div className="p-6 text-center text-xs text-muted-foreground space-y-1.5">
+                  <Inbox className="w-6 h-6 mx-auto opacity-40 text-muted-foreground" />
+                  <p className="font-semibold text-foreground">No notifications yet</p>
+                  <p className="text-[11px]">Your live AI generation and scheduling updates will appear here.</p>
+                </div>
+              )}
+
+              {!isLoadingNotifs && notifications.length > 0 && notifications.map((notif) => (
+                <div
+                  key={notif.id}
+                  onClick={() => handleItemClick(notif)}
+                  className={`p-3 hover:bg-white/5 transition-colors cursor-pointer relative group ${
+                    !notif.isRead ? 'bg-white/[0.02]' : ''
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5">
+                    {getNotifIcon(notif.type)}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <div className={`text-xs truncate ${!notif.isRead ? 'font-bold text-foreground' : 'font-medium text-foreground/90'}`}>
+                          {notif.title}
+                        </div>
+                        {!notif.isRead && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                        )}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">
+                        {notif.message}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground/60 mt-1">
+                        {formatTime(notif.createdAt)}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="p-3 hover:bg-white/5 transition-colors cursor-pointer">
-                <div className="flex items-start gap-2.5">
-                  <div className="p-1.5 rounded-lg bg-primary/10 text-primary mt-0.5">
-                    <Sparkles size={14} />
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-foreground">Auto-Post Published</div>
-                    <div className="text-[11px] text-muted-foreground">Instagram reel is now live.</div>
-                    <div className="text-[10px] text-muted-foreground/70 mt-1">1 hour ago</div>
-                  </div>
-                </div>
-              </div>
+              ))}
             </div>
           </DropdownMenuContent>
         </DropdownMenu>

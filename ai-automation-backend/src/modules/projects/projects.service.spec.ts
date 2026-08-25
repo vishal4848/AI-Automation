@@ -3,6 +3,8 @@ import { ProjectsService } from './projects.service';
 import { PrismaService } from '../../database/prisma.service';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
+import { NotificationsService } from '../notifications/notifications.service';
+
 describe('ProjectsService', () => {
   let service: ProjectsService;
   let prisma: PrismaService;
@@ -17,11 +19,16 @@ describe('ProjectsService', () => {
     },
   };
 
+  const mockNotificationsService = {
+    create: jest.fn().mockResolvedValue({ id: 'notif-1' }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProjectsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: NotificationsService, useValue: mockNotificationsService },
       ],
     }).compile();
 

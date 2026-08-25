@@ -16,6 +16,7 @@ import { ModelsModule } from './modules/models/models.module';
 import { SocialModule } from './modules/social/social.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
 import { ProjectsModule } from './modules/projects/projects.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -69,6 +70,9 @@ import { AppService } from './app.service';
 
     // ─── Projects & Workspace ─────────────────────────────────────────
     ProjectsModule,
+
+    // ─── Notifications ───────────────────────────────────────────────
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

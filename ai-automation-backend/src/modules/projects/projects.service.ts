@@ -2,12 +2,16 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { PrismaService } from '../../database/prisma.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ProjectsService {
   private readonly logger = new Logger(ProjectsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+  ) {}
 
   async create(userId: string, dto: CreateProjectDto) {
     if (!userId) {
@@ -28,6 +32,15 @@ export class ProjectsService {
     });
 
     this.logger.log(`Project created: "${project.name}" (ID: ${project.id}) for user ${userId}`);
+
+    // Create live notification
+    await this.notificationsService.create(userId, {
+      type: 'PROJECT_CREATED',
+      title: 'Project Created',
+      message: `Project "${project.name}" created in workspace.`,
+      data: { projectId: project.id },
+    });
+
     return project;
   }
 
