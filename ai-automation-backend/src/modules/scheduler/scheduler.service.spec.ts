@@ -3,6 +3,9 @@ import { SchedulerService } from './scheduler.service';
 import { PrismaService } from '../../database/prisma.service';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
+import { InstagramPublisher } from './publishers/instagram.publisher';
+import { FacebookPublisher } from './publishers/facebook.publisher';
+import { LinkedInPublisher } from './publishers/linkedin.publisher';
 
 describe('SchedulerService', () => {
   let service: SchedulerService;
@@ -20,10 +23,15 @@ describe('SchedulerService', () => {
     scheduledPost: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
       update: jest.fn(),
       findMany: jest.fn(),
     },
   };
+
+  const mockInstagramPublisher = { publish: jest.fn().mockResolvedValue('ig-post-123') };
+  const mockFacebookPublisher = { publish: jest.fn().mockResolvedValue('fb-post-123') };
+  const mockLinkedInPublisher = { publish: jest.fn().mockResolvedValue('li-post-123') };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -31,6 +39,9 @@ describe('SchedulerService', () => {
         SchedulerService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: getQueueToken('instagram-publish'), useValue: mockQueue },
+        { provide: InstagramPublisher, useValue: mockInstagramPublisher },
+        { provide: FacebookPublisher, useValue: mockFacebookPublisher },
+        { provide: LinkedInPublisher, useValue: mockLinkedInPublisher },
       ],
     }).compile();
 
@@ -144,10 +155,12 @@ describe('SchedulerService', () => {
         });
       });
 
+      const futureDate = new Date(Date.now() + 1000 * 60 * 60).toISOString();
       const result = await service.createScheduledPost('user-1', {
         socialAccountIds: ['acc-ig', 'acc-fb'],
         mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
         caption: 'Multi-platform post',
+        scheduledAtUTC: futureDate,
       });
 
       expect(result.createdPosts).toHaveLength(2);
@@ -170,14 +183,16 @@ describe('SchedulerService', () => {
           platform: data.platform,
           mediaUrl: data.mediaUrl,
           caption: data.caption,
-          status: 'PROCESSING',
+          status: 'SCHEDULED',
         });
       });
 
+      const futureDate = new Date(Date.now() + 1000 * 60 * 60).toISOString();
       const result = await service.createScheduledPost('user-1', {
         socialAccountIds: ['acc-ig', 'acc-fb', 'acc-li'],
         mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
         caption: 'Omnichannel post across IG, FB, and LinkedIn',
+        scheduledAtUTC: futureDate,
       });
 
       expect(result.createdPosts).toHaveLength(3);
@@ -194,25 +209,31 @@ describe('SchedulerService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('should immediately update status to PROCESSING and queue job with delay 0', async () => {
+    it('should immediately execute publish and update status to PUBLISHED', async () => {
       mockPrisma.scheduledPost.findFirst.mockResolvedValue({
         id: 'post-1',
         userId: 'user-1',
         status: 'SCHEDULED',
+        platform: 'Instagram',
+        socialAccount: { id: 'acc-1', platform: 'Instagram' },
+      });
+      mockPrisma.scheduledPost.findUnique.mockResolvedValue({
+        id: 'post-1',
+        userId: 'user-1',
+        status: 'PROCESSING',
+        platform: 'Instagram',
+        socialAccount: { id: 'acc-1', platform: 'Instagram' },
       });
       mockPrisma.scheduledPost.update.mockResolvedValue({
         id: 'post-1',
-        status: 'PROCESSING',
+        status: 'PUBLISHED',
+        externalPostId: 'ig-post-123',
       });
 
       const result = await service.publishNow('user-1', 'post-1');
 
-      expect(result.status).toBe('PROCESSING');
-      expect(mockQueue.add).toHaveBeenCalledWith(
-        'publish-post',
-        { postId: 'post-1' },
-        expect.objectContaining({ delay: 0 })
-      );
+      expect(result.status).toBe('PUBLISHED');
+      expect(mockInstagramPublisher.publish).toHaveBeenCalled();
     });
   });
 

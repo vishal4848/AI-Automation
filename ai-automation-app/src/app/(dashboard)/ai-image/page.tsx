@@ -95,6 +95,7 @@ export default function AIImageStudio() {
         if (newImgObj.url) {
           setGeneratedImages(prev => [newImgObj, ...prev]);
           queryClient.invalidateQueries({ queryKey: ['analytics'] });
+          queryClient.invalidateQueries({ queryKey: ['content-library-images'] });
         }
       } else {
         setErrorMsg(data.error || 'Failed to generate image. Please try again.');
@@ -206,6 +207,7 @@ export default function AIImageStudio() {
       }));
 
       queryClient.invalidateQueries({ queryKey: ['analytics'] });
+      queryClient.invalidateQueries({ queryKey: ['content-library-images'] });
       setImageToDelete(null);
       setNotification({ type: 'success', text: 'Image deleted successfully.' });
       setTimeout(() => setNotification(null), 3500);
