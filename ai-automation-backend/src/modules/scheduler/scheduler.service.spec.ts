@@ -1,0 +1,257 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { SchedulerService } from './scheduler.service';
+import { PrismaService } from '../../database/prisma.service';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bullmq';
+
+describe('SchedulerService', () => {
+  let service: SchedulerService;
+  let prisma: PrismaService;
+
+  const mockQueue = {
+    add: jest.fn().mockResolvedValue({ id: 'job-1' }),
+    remove: jest.fn().mockResolvedValue(undefined),
+  };
+
+  const mockPrisma = {
+    socialAccount: {
+      findFirst: jest.fn(),
+    },
+    scheduledPost: {
+      create: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+      findMany: jest.fn(),
+    },
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SchedulerService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: getQueueToken('instagram-publish'), useValue: mockQueue },
+      ],
+    }).compile();
+
+    service = module.get<SchedulerService>(SchedulerService);
+    prisma = module.get<PrismaService>(PrismaService);
+    jest.clearAllMocks();
+  });
+
+  describe('createScheduledPost', () => {
+    it('should reject post if scheduled time is in the past', async () => {
+      mockPrisma.socialAccount.findFirst.mockResolvedValue({
+        id: 'acc-1',
+        userId: 'user-1',
+        status: 'CONNECTED',
+      });
+
+      const pastDate = new Date(Date.now() - 1000 * 60 * 60).toISOString();
+
+      await expect(
+        service.createScheduledPost('user-1', {
+          platform: 'Instagram',
+          socialAccountId: 'acc-1',
+          mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+          caption: 'Test caption',
+          scheduledAtUTC: pastDate,
+        })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject post if social account is not connected or does not belong to user', async () => {
+      mockPrisma.socialAccount.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.createScheduledPost('user-1', {
+          platform: 'Instagram',
+          socialAccountId: 'acc-other-user',
+          mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+          caption: 'Test caption',
+        })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject localhost media URLs', async () => {
+      mockPrisma.socialAccount.findFirst.mockResolvedValue({
+        id: 'acc-1',
+        userId: 'user-1',
+        status: 'CONNECTED',
+      });
+
+      await expect(
+        service.createScheduledPost('user-1', {
+          platform: 'Instagram',
+          socialAccountId: 'acc-1',
+          mediaUrl: 'http://localhost:3000/test.png',
+        })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should create post scoped to authenticated userId and add job to queue with exponential backoff', async () => {
+      mockPrisma.socialAccount.findFirst.mockResolvedValue({
+        id: 'acc-1',
+        userId: 'user-1',
+        status: 'CONNECTED',
+      });
+
+      const futureDate = new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString();
+
+      mockPrisma.scheduledPost.create.mockResolvedValue({
+        id: 'post-1',
+        userId: 'user-1',
+        socialAccountId: 'acc-1',
+        platform: 'Instagram',
+        mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+        caption: 'Future post',
+        scheduledAtUTC: new Date(futureDate),
+        status: 'SCHEDULED',
+      });
+
+      const result = await service.createScheduledPost('user-1', {
+        platform: 'Instagram',
+        socialAccountId: 'acc-1',
+        mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+        caption: 'Future post',
+        scheduledAtUTC: futureDate,
+      });
+
+      expect(result.userId).toBe('user-1');
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'publish-post',
+        { postId: 'post-1' },
+        expect.objectContaining({ attempts: 3, backoff: { type: 'exponential', delay: 30000 } })
+      );
+    });
+
+    it('should create multiple posts when scheduling to both Instagram and Facebook simultaneously', async () => {
+      mockPrisma.socialAccount.findFirst.mockImplementation(({ where }: any) => {
+        if (where.id === 'acc-ig') return Promise.resolve({ id: 'acc-ig', userId: 'user-1', platform: 'Instagram', status: 'CONNECTED' });
+        if (where.id === 'acc-fb') return Promise.resolve({ id: 'acc-fb', userId: 'user-1', platform: 'Facebook', status: 'CONNECTED' });
+        return Promise.resolve(null);
+      });
+
+      mockPrisma.scheduledPost.create.mockImplementation(({ data }: any) => {
+        return Promise.resolve({
+          id: `post-${data.platform}`,
+          userId: data.userId,
+          socialAccountId: data.socialAccountId,
+          platform: data.platform,
+          mediaUrl: data.mediaUrl,
+          caption: data.caption,
+          status: 'PROCESSING',
+        });
+      });
+
+      const result = await service.createScheduledPost('user-1', {
+        socialAccountIds: ['acc-ig', 'acc-fb'],
+        mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+        caption: 'Multi-platform post',
+      });
+
+      expect(result.createdPosts).toHaveLength(2);
+      expect(mockQueue.add).toHaveBeenCalledTimes(2);
+    });
+
+    it('should create multiple posts when scheduling to Instagram, Facebook, and LinkedIn simultaneously', async () => {
+      mockPrisma.socialAccount.findFirst.mockImplementation(({ where }: any) => {
+        if (where.id === 'acc-ig') return Promise.resolve({ id: 'acc-ig', userId: 'user-1', platform: 'Instagram', status: 'CONNECTED' });
+        if (where.id === 'acc-fb') return Promise.resolve({ id: 'acc-fb', userId: 'user-1', platform: 'Facebook', status: 'CONNECTED' });
+        if (where.id === 'acc-li') return Promise.resolve({ id: 'acc-li', userId: 'user-1', platform: 'LinkedIn', status: 'CONNECTED' });
+        return Promise.resolve(null);
+      });
+
+      mockPrisma.scheduledPost.create.mockImplementation(({ data }: any) => {
+        return Promise.resolve({
+          id: `post-${data.platform}`,
+          userId: data.userId,
+          socialAccountId: data.socialAccountId,
+          platform: data.platform,
+          mediaUrl: data.mediaUrl,
+          caption: data.caption,
+          status: 'PROCESSING',
+        });
+      });
+
+      const result = await service.createScheduledPost('user-1', {
+        socialAccountIds: ['acc-ig', 'acc-fb', 'acc-li'],
+        mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+        caption: 'Omnichannel post across IG, FB, and LinkedIn',
+      });
+
+      expect(result.createdPosts).toHaveLength(3);
+      expect(mockQueue.add).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('publishNow', () => {
+    it('should prevent User A from publishing User B post (IDOR protection)', async () => {
+      mockPrisma.scheduledPost.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.publishNow('attacker-user', 'victim-post-id')
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should immediately update status to PROCESSING and queue job with delay 0', async () => {
+      mockPrisma.scheduledPost.findFirst.mockResolvedValue({
+        id: 'post-1',
+        userId: 'user-1',
+        status: 'SCHEDULED',
+      });
+      mockPrisma.scheduledPost.update.mockResolvedValue({
+        id: 'post-1',
+        status: 'PROCESSING',
+      });
+
+      const result = await service.publishNow('user-1', 'post-1');
+
+      expect(result.status).toBe('PROCESSING');
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'publish-post',
+        { postId: 'post-1' },
+        expect.objectContaining({ delay: 0 })
+      );
+    });
+  });
+
+  describe('cancelScheduledPost', () => {
+    it('should reject cancellation if post does not belong to the user', async () => {
+      mockPrisma.scheduledPost.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.cancelScheduledPost('user-attacker', 'post-victim')
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should reject cancellation if post is already published', async () => {
+      mockPrisma.scheduledPost.findFirst.mockResolvedValue({
+        id: 'post-1',
+        userId: 'user-1',
+        status: 'PUBLISHED',
+      });
+
+      await expect(
+        service.cancelScheduledPost('user-1', 'post-1')
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should successfully cancel post owned by authenticated user and remove queue job', async () => {
+      mockPrisma.scheduledPost.findFirst.mockResolvedValue({
+        id: 'post-1',
+        userId: 'user-1',
+        status: 'SCHEDULED',
+      });
+
+      mockPrisma.scheduledPost.update.mockResolvedValue({
+        id: 'post-1',
+        status: 'CANCELLED',
+      });
+
+      const result = await service.cancelScheduledPost('user-1', 'post-1');
+      expect(result.status).toBe('CANCELLED');
+      expect(mockQueue.remove).toHaveBeenCalledWith('post-post-1');
+    });
+  });
+});

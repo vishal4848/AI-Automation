@@ -1,0 +1,112 @@
+"use client";
+
+import React from 'react';
+import { motion } from 'framer-motion';
+import { Canvas } from '@react-three/fiber';
+import { Environment, Float, OrbitControls } from '@react-three/drei';
+import { CheckCircle2, Globe, Share2, Briefcase, PlayCircle } from 'lucide-react';
+import FloatingPanels from '@/components/landing/3d/FloatingPanels';
+
+const featuresList = [
+  "Cross-platform content generation",
+  "Automated posting schedules",
+  "AI-driven engagement analytics",
+  "Smart hashtag suggestions"
+];
+
+export default function ProductShowcase() {
+  return (
+    <section id="product" className="py-32 bg-zinc-950 relative overflow-hidden">
+      <div className="container mx-auto px-6">
+        <div className="flex flex-col lg:flex-row items-center gap-16">
+          
+          {/* Left Side */}
+          <div className="w-full lg:w-1/2">
+            <motion.h2 
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              className="text-4xl md:text-5xl font-bold text-white mb-8"
+            >
+              See It In <span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-500 to-cyan-500">Action</span>
+            </motion.h2>
+            
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.1 }}
+              className="text-zinc-400 text-lg mb-10"
+            >
+              Experience the power of a complete AI command center. Visualize your entire content ecosystem in one centralized dashboard.
+            </motion.p>
+
+            <div className="flex flex-col gap-4 mb-12">
+              {featuresList.map((feature, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, x: -20 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: 0.2 + i * 0.1 }}
+                  className="flex items-center gap-3"
+                >
+                  <CheckCircle2 className="w-6 h-6 text-cyan-400" />
+                  <span className="text-zinc-200 text-lg">{feature}</span>
+                </motion.div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-3 gap-6">
+              {[
+                { label: "Images Generated", value: "2M+" },
+                { label: "Videos Rendered", value: "500K+" },
+                { label: "Captions Written", value: "10M+" }
+              ].map((stat, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: 0.4 + i * 0.1 }}
+                >
+                  <div className="text-2xl font-bold text-white mb-1">{stat.value}</div>
+                  <div className="text-sm text-zinc-500">{stat.label}</div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+
+          {/* Right Side - 3D Canvas */}
+          <div className="w-full lg:w-1/2 h-[500px] relative">
+            <div className="absolute inset-0 bg-gradient-to-tr from-violet-500/10 to-cyan-500/10 rounded-3xl border border-white/[0.08] pointer-events-none" />
+            <Canvas camera={{ position: [0, 0, 8], fov: 45 }} className="rounded-3xl">
+              <ambientLight intensity={0.5} />
+              <pointLight position={[10, 10, 10]} intensity={1} />
+              <Float speed={1.5} rotationIntensity={0.5} floatIntensity={1}>
+                <FloatingPanels />
+              </Float>
+              <Environment preset="city" />
+              <OrbitControls enableZoom={false} autoRotate autoRotateSpeed={0.5} />
+            </Canvas>
+          </div>
+
+        </div>
+
+        {/* Bottom Platform Badges */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.6 }}
+          className="mt-20 pt-10 border-t border-white/[0.08] flex justify-center items-center gap-8 md:gap-16 flex-wrap opacity-50 grayscale hover:grayscale-0 transition-all duration-500"
+        >
+          <Globe className="w-8 h-8 text-white" />
+          <Share2 className="w-8 h-8 text-white" />
+          <Briefcase className="w-8 h-8 text-white" />
+          <PlayCircle className="w-8 h-8 text-white" />
+        </motion.div>
+      </div>
+    </section>
+  );
+}
