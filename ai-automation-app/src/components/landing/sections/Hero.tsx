@@ -87,14 +87,14 @@ export default function Hero() {
             <span className="text-sm font-medium text-zinc-300 relative z-10">🚀 Trusted by 50,000+ creators</span>
           </motion.div>
 
-          <h1 className="text-6xl md:text-8xl font-black mb-6 flex flex-wrap overflow-hidden leading-tight">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl font-black mb-6 flex flex-nowrap whitespace-nowrap overflow-hidden leading-tight">
             {headline.split('').map((char, index) => (
               <motion.span
                 key={index}
                 initial={{ opacity: 0, y: 50 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: index * 0.05 }}
-                className={char === ' ' ? 'mr-4' : 'bg-clip-text text-transparent bg-gradient-to-br from-violet-500 to-cyan-500'}
+                className={char === ' ' ? 'mr-2 sm:mr-4' : 'bg-clip-text text-transparent bg-gradient-to-br from-violet-500 to-cyan-500'}
               >
                 {char}
               </motion.span>
