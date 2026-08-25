@@ -27,47 +27,45 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <main className="bg-[#09090b] min-h-screen text-white overflow-x-hidden">
+    <main className="bg-[#09090b] min-h-screen text-white overflow-x-hidden relative">
       <AnimatePresence>
         {!isLoaded && <Loader onComplete={() => setIsLoaded(true)} />}
       </AnimatePresence>
 
       <CustomCursor />
 
-      {isLoaded && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.8 }}
-        >
-          <LandingNavbar />
-          <section id="hero">
-            <Hero />
-          </section>
-          <section id="features">
-            <Features />
-          </section>
-          <section id="workflow">
-            <Workflow />
-          </section>
-          <section id="product">
-            <ProductShowcase />
-          </section>
-          <section id="social">
-            <SocialAutomation />
-          </section>
-          <section id="showcase">
-            <AIShowcase />
-          </section>
-          <section id="testimonials">
-            <Testimonials />
-          </section>
-          <section id="pricing">
-            <Pricing />
-          </section>
-          <Footer />
-        </motion.div>
-      )}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: isLoaded ? 1 : 0 }}
+        transition={{ duration: 0.8 }}
+      >
+        <LandingNavbar />
+        <section id="hero">
+          <Hero />
+        </section>
+        <section id="features">
+          <Features />
+        </section>
+        <section id="workflow">
+          <Workflow />
+        </section>
+        <section id="product">
+          <ProductShowcase />
+        </section>
+        <section id="social">
+          <SocialAutomation />
+        </section>
+        <section id="showcase">
+          <AIShowcase />
+        </section>
+        <section id="testimonials">
+          <Testimonials />
+        </section>
+        <section id="pricing">
+          <Pricing />
+        </section>
+        <Footer />
+      </motion.div>
     </main>
   );
 }

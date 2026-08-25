@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Canvas } from '@react-three/fiber';
 import { Environment, Float, OrbitControls } from '@react-three/drei';
@@ -15,6 +15,11 @@ const featuresList = [
 ];
 
 export default function ProductShowcase() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   return (
     <section id="product" className="py-32 bg-zinc-950 relative overflow-hidden">
       <div className="container mx-auto px-6">
@@ -80,15 +85,17 @@ export default function ProductShowcase() {
           {/* Right Side - 3D Canvas */}
           <div className="w-full lg:w-1/2 h-[500px] relative">
             <div className="absolute inset-0 bg-gradient-to-tr from-violet-500/10 to-cyan-500/10 rounded-3xl border border-white/[0.08] pointer-events-none" />
-            <Canvas camera={{ position: [0, 0, 8], fov: 45 }} className="rounded-3xl">
-              <ambientLight intensity={0.5} />
-              <pointLight position={[10, 10, 10]} intensity={1} />
-              <Float speed={1.5} rotationIntensity={0.5} floatIntensity={1}>
-                <FloatingPanels />
-              </Float>
-              <Environment preset="city" />
-              <OrbitControls enableZoom={false} autoRotate autoRotateSpeed={0.5} />
-            </Canvas>
+            {mounted && (
+              <Canvas camera={{ position: [0, 0, 8], fov: 45 }} className="rounded-3xl w-full h-full">
+                <ambientLight intensity={0.5} />
+                <pointLight position={[10, 10, 10]} intensity={1} />
+                <Float speed={1.5} rotationIntensity={0.5} floatIntensity={1}>
+                  <FloatingPanels />
+                </Float>
+                <Environment preset="city" />
+                <OrbitControls enableZoom={false} autoRotate autoRotateSpeed={0.5} />
+              </Canvas>
+            )}
           </div>
 
         </div>

@@ -47,12 +47,11 @@ export default function AIShowcase() {
               initial={{ opacity: 0, y: 30 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
-              transition={{ duration: 0.5, delay: i * 0.1 }}
               whileHover={{ scale: 1.03 }}
               animate={{ y: [0, -8, 0] }}
-              style={{ transition: 'all 0.3s ease' }}
-              // @ts-ignore - custom framer motion transition typing mismatch sometimes
               transition={{
+                duration: 0.5,
+                delay: i * 0.1,
                 y: {
                   duration: 4,
                   repeat: Infinity,

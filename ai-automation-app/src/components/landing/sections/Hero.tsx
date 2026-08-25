@@ -5,8 +5,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Sparkles, Play, ArrowRight } from 'lucide-react';
-import Scene from '@/components/landing/3d/Scene';
+import dynamic from 'next/dynamic';
 import { MagneticButton } from '@/components/landing/ui/MagneticButton';
+
+const Scene = dynamic(() => import('@/components/landing/3d/Scene'), {
+  ssr: false,
+  loading: () => <div className="w-full h-full bg-zinc-950/30" />
+});
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -61,8 +66,8 @@ export default function Hero() {
       className="relative min-h-screen flex items-center justify-center overflow-hidden bg-zinc-950 pt-20"
     >
       {/* Full-screen Scene background */}
-      <div className="absolute inset-0 z-0 opacity-30">
-        <Scene showBrain={false} />
+      <div className="absolute inset-0 z-0 opacity-30 w-full h-full">
+        <Scene showBrain={false} className="w-full h-full" />
       </div>
       
       {/* Vignette */}
@@ -167,7 +172,7 @@ export default function Hero() {
         <div className="hidden md:flex w-1/2 items-center justify-center relative">
           <div className="absolute w-[500px] h-[500px] bg-[radial-gradient(circle,_var(--tw-gradient-stops))] from-violet-500/20 to-transparent rounded-full blur-[80px]" />
           <div className="w-[500px] h-[500px] relative z-10">
-            <Scene showBrain={true} />
+            <Scene showBrain={true} className="w-full h-full" />
           </div>
         </div>
 
