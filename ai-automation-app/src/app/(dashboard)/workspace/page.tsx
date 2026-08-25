@@ -49,8 +49,13 @@ export default function WorkspacePage() {
     }
   }, []);
 
-  // Fetch real projects from PostgreSQL database
-  const { data: projectsData, isLoading: isLoadingProjects, isError: isErrorProjects, refetch: refetchProjects } = useQuery({
+  // Fetch real projects from PostgreSQL database with robust fallback parsing
+  const { 
+    data: projectsData, 
+    isLoading: isLoadingProjects, 
+    isError: isErrorProjects, 
+    refetch: refetchProjects 
+  } = useQuery({
     queryKey: ['workspace-projects'],
     queryFn: async () => {
       const res = await fetch('/api/projects');
@@ -58,7 +63,11 @@ export default function WorkspacePage() {
         throw new Error('Failed to fetch projects');
       }
       const json = await res.json();
-      return json.projects || [];
+      if (Array.isArray(json)) return json;
+      if (Array.isArray(json.projects)) return json.projects;
+      if (Array.isArray(json.data?.projects)) return json.data.projects;
+      if (Array.isArray(json.data)) return json.data;
+      return [];
     },
     staleTime: 5000,
   });
@@ -88,7 +97,11 @@ export default function WorkspacePage() {
       const res = await fetch(`/api/images?projectId=${activeProjectId}&limit=50`);
       if (!res.ok) return [];
       const json = await res.json();
-      return json.images || json.data?.images || [];
+      if (Array.isArray(json.images)) return json.images;
+      if (Array.isArray(json.data?.images)) return json.data.images;
+      if (Array.isArray(json.data)) return json.data;
+      if (Array.isArray(json)) return json;
+      return [];
     },
     enabled: Boolean(activeProjectId),
     staleTime: 5000,
@@ -104,7 +117,7 @@ export default function WorkspacePage() {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // Create Project Mutation
+  // Create Project Mutation with immediate optimistic update
   const createMutation = useMutation({
     mutationFn: async ({ name, description }: { name: string; description?: string }) => {
       const res = await fetch('/api/projects', {
@@ -113,20 +126,36 @@ export default function WorkspacePage() {
         body: JSON.stringify({ name, description }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || (data.success === false && data.error)) {
         throw new Error(data.error || 'Failed to create project');
       }
       return data;
     },
     onSuccess: (newProj) => {
+      const proj = newProj?.data !== undefined ? newProj.data : newProj;
+      const createdId = proj?.id;
+
+      // Optimistic cache update
+      queryClient.setQueryData(['workspace-projects'], (old: any) => {
+        const currentList = Array.isArray(old) ? old : (old?.projects || []);
+        if (proj && proj.id) {
+          return [proj, ...currentList.filter((p: any) => p.id !== proj.id)];
+        }
+        return currentList;
+      });
+
       queryClient.invalidateQueries({ queryKey: ['workspace-projects'] });
-      setActiveProjectId(newProj.id);
-      localStorage.setItem('ai_automation_active_project_id', newProj.id);
+
+      if (createdId) {
+        setActiveProjectId(createdId);
+        localStorage.setItem('ai_automation_active_project_id', createdId);
+      }
+
       setIsCreateModalOpen(false);
       setNewProjectName('');
       setNewProjectDescription('');
       setFormError('');
-      setNotification({ type: 'success', text: `Project "${newProj.name}" created successfully!` });
+      setNotification({ type: 'success', text: `Project "${proj?.name || 'New Project'}" created successfully!` });
       setTimeout(() => setNotification(null), 3500);
     },
     onError: (err: any) => {
@@ -162,10 +191,11 @@ export default function WorkspacePage() {
         throw new Error(data.error || 'Failed to delete project');
       }
 
-      queryClient.setQueryData(['workspace-projects'], (old: any[]) => {
+      queryClient.setQueryData(['workspace-projects'], (old: any) => {
         if (!Array.isArray(old)) return [];
         return old.filter((p) => p.id !== projectToDelete.id);
       });
+      queryClient.invalidateQueries({ queryKey: ['workspace-projects'] });
       queryClient.invalidateQueries({ queryKey: ['workspace-project-images'] });
 
       setProjectToDelete(null);

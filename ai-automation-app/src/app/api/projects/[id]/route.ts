@@ -7,9 +7,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const resolvedParams = await params;
     const response = await backendFetch(`/api/v1/projects/${resolvedParams.id}`, {}, req);
     const data = await response.json().catch(() => ({}));
-    return NextResponse.json(data, { status: response.status });
+    const payload = data?.data !== undefined ? data.data : data;
+    return NextResponse.json({ success: response.ok, ...payload }, { status: response.status });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: error.status || 500 });
+    return NextResponse.json({ success: false, error: error.message }, { status: error.status || 500 });
   }
 }
 
@@ -22,9 +23,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       body: JSON.stringify(body),
     }, req);
     const data = await response.json().catch(() => ({}));
-    return NextResponse.json(data, { status: response.status });
+    const payload = data?.data !== undefined ? data.data : data;
+    return NextResponse.json({ success: response.ok, ...payload }, { status: response.status });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: error.status || 500 });
+    return NextResponse.json({ success: false, error: error.message }, { status: error.status || 500 });
   }
 }
 
@@ -35,8 +37,9 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       method: 'DELETE',
     }, req);
     const data = await response.json().catch(() => ({}));
-    return NextResponse.json(data, { status: response.status });
+    const payload = data?.data !== undefined ? data.data : data;
+    return NextResponse.json({ success: response.ok, ...payload }, { status: response.status });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: error.status || 500 });
+    return NextResponse.json({ success: false, error: error.message }, { status: error.status || 500 });
   }
 }
