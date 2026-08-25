@@ -15,6 +15,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ModelsModule } from './modules/models/models.module';
 import { SocialModule } from './modules/social/social.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
+import { ProjectsModule } from './modules/projects/projects.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -65,6 +66,9 @@ import { AppService } from './app.service';
 
     // ─── Scheduler ───────────────────────────────────────────────────
     SchedulerModule,
+
+    // ─── Projects & Workspace ─────────────────────────────────────────
+    ProjectsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
