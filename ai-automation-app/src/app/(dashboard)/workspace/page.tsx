@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { 
   Users, 
   FolderKanban, 
@@ -13,7 +15,11 @@ import {
   X, 
   ExternalLink,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  Image as ImageIcon,
+  Calendar,
+  Eye,
+  Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -23,6 +29,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 
 export default function WorkspacePage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
 
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -43,7 +50,7 @@ export default function WorkspacePage() {
   }, []);
 
   // Fetch real projects from PostgreSQL database
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data: projectsData, isLoading: isLoadingProjects, isError: isErrorProjects, refetch: refetchProjects } = useQuery({
     queryKey: ['workspace-projects'],
     queryFn: async () => {
       const res = await fetch('/api/projects');
@@ -56,7 +63,7 @@ export default function WorkspacePage() {
     staleTime: 5000,
   });
 
-  const projects: any[] = Array.isArray(data) ? data : [];
+  const projects: any[] = Array.isArray(projectsData) ? projectsData : [];
 
   // Update active project if previous was deleted or none selected
   useEffect(() => {
@@ -72,6 +79,23 @@ export default function WorkspacePage() {
       localStorage.removeItem('ai_automation_active_project_id');
     }
   }, [projects, activeProjectId]);
+
+  // Fetch images belonging to the active project
+  const { data: projectImagesData, isLoading: isLoadingImages } = useQuery({
+    queryKey: ['workspace-project-images', activeProjectId],
+    queryFn: async () => {
+      if (!activeProjectId) return [];
+      const res = await fetch(`/api/images?projectId=${activeProjectId}&limit=50`);
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json.images || json.data?.images || [];
+    },
+    enabled: Boolean(activeProjectId),
+    staleTime: 5000,
+  });
+
+  const projectImages: any[] = Array.isArray(projectImagesData) ? projectImagesData : [];
+  const activeProject = projects.find((p) => p.id === activeProjectId);
 
   const handleSelectProject = (projectId: string) => {
     setActiveProjectId(projectId);
@@ -142,6 +166,7 @@ export default function WorkspacePage() {
         if (!Array.isArray(old)) return [];
         return old.filter((p) => p.id !== projectToDelete.id);
       });
+      queryClient.invalidateQueries({ queryKey: ['workspace-project-images'] });
 
       setProjectToDelete(null);
       setNotification({ type: 'success', text: 'Project permanently deleted.' });
@@ -164,7 +189,7 @@ export default function WorkspacePage() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-4 md:p-8 min-h-[calc(100vh-8rem)] flex flex-col">
+    <div className="space-y-8 max-w-7xl mx-auto p-4 md:p-8 min-h-[calc(100vh-8rem)] flex flex-col">
       {/* Toast Notification */}
       <AnimatePresence>
         {notification && (
@@ -189,7 +214,7 @@ export default function WorkspacePage() {
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">Team Workspace</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Collaborate on AI content creation, manage team permissions, and organize brand assets.
+            Organize brand projects, store generated assets, and collaborate with your AI workflow.
           </p>
         </div>
 
@@ -212,11 +237,11 @@ export default function WorkspacePage() {
       </div>
 
       {/* Projects Section */}
-      <div className="space-y-4 flex-1 flex flex-col">
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
             <FolderKanban className="w-5 h-5 text-blue-500" />
-            <span>Active Team Projects</span>
+            <span>Workspace Projects</span>
             {projects.length > 0 && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground font-mono">
                 {projects.length}
@@ -226,7 +251,7 @@ export default function WorkspacePage() {
         </div>
 
         {/* Loading Skeleton */}
-        {isLoading && (
+        {isLoadingProjects && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="h-36 rounded-2xl bg-secondary/30 border border-border/40 animate-pulse" />
@@ -235,25 +260,25 @@ export default function WorkspacePage() {
         )}
 
         {/* Error State */}
-        {isError && (
+        {isErrorProjects && (
           <div className="p-8 text-center border border-border rounded-2xl bg-card/30 space-y-3">
             <AlertCircle className="w-8 h-8 text-destructive mx-auto" />
             <p className="text-sm font-semibold text-foreground">Failed to load workspace projects</p>
-            <Button variant="outline" size="sm" onClick={() => refetch()} className="rounded-xl text-xs">
+            <Button variant="outline" size="sm" onClick={() => refetchProjects()} className="rounded-xl text-xs">
               Retry
             </Button>
           </div>
         )}
 
         {/* Empty Workspace State */}
-        {!isLoading && !isError && projects.length === 0 && (
+        {!isLoadingProjects && !isErrorProjects && projects.length === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center rounded-3xl border border-dashed border-border/60 bg-card/20 my-4">
             <div className="w-16 h-16 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-500 mb-4">
               <FolderKanban className="w-8 h-8 opacity-80" />
             </div>
             <h3 className="text-lg font-bold text-foreground">No projects yet</h3>
             <p className="text-sm text-muted-foreground max-w-sm mt-1 mb-6">
-              Create your first project to start generating content and automating your social media workflow.
+              Create your first project to start generating content and organizing your AI assets.
             </p>
             <Button
               onClick={() => {
@@ -269,7 +294,7 @@ export default function WorkspacePage() {
         )}
 
         {/* Real Projects Grid */}
-        {!isLoading && !isError && projects.length > 0 && (
+        {!isLoadingProjects && !isErrorProjects && projects.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {projects.map((project) => {
               const isActive = project.id === activeProjectId;
@@ -324,6 +349,98 @@ export default function WorkspacePage() {
           </div>
         )}
       </div>
+
+      {/* Active Project Assets & Generated Images Section */}
+      {activeProject && (
+        <div className="space-y-4 pt-4 border-t border-border">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <ImageIcon className="w-5 h-5 text-violet-400" />
+                <h2 className="text-lg font-bold text-foreground">
+                  Assets in <span className="text-blue-400">"{activeProject.name}"</span>
+                </h2>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground font-mono">
+                  {projectImages.length} images
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Images stored directly in this workspace project.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Link
+                href="/ai-image"
+                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-all shadow-sm"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Generate in this Project</span>
+              </Link>
+              <Link
+                href="/content-library"
+                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-border text-foreground text-xs font-semibold hover:bg-secondary transition-all"
+              >
+                <span>View in Content Library</span>
+              </Link>
+            </div>
+          </div>
+
+          {/* Project Images Gallery */}
+          {isLoadingImages ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="aspect-square rounded-2xl bg-secondary/30 animate-pulse border border-border/40" />
+              ))}
+            </div>
+          ) : projectImages.length === 0 ? (
+            <div className="p-8 text-center rounded-2xl border border-dashed border-border/60 bg-card/20 space-y-3">
+              <ImageIcon className="w-8 h-8 text-muted-foreground mx-auto opacity-50" />
+              <p className="text-sm font-semibold text-foreground">No images stored in this project yet</p>
+              <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                Generate images in Image Studio with this project selected to store them here automatically.
+              </p>
+              <Link
+                href="/ai-image"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-all shadow-sm"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Create First Image</span>
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {projectImages.map((img) => (
+                <motion.div
+                  key={img.id}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="group relative aspect-square rounded-2xl overflow-hidden bg-secondary/30 border border-border hover:border-primary/50 transition-all shadow-sm"
+                >
+                  <img
+                    src={img.url}
+                    alt={img.prompt || 'Project Image'}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2.5">
+                    <span className="text-[10px] text-white/90 line-clamp-2">{img.prompt}</span>
+                    <div className="flex justify-end gap-1.5">
+                      <button
+                        onClick={() => router.push(`/scheduler?mediaUrl=${encodeURIComponent(img.url)}&caption=${encodeURIComponent(img.prompt || '')}&autoOpen=true`)}
+                        className="p-1.5 bg-white/20 hover:bg-cyan-500 text-white rounded-lg transition-colors"
+                        title="Schedule"
+                      >
+                        <Calendar size={13} />
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Create Project Modal */}
       <AnimatePresence>

@@ -18,8 +18,14 @@ export class ImagesController {
   }
 
   @Get()
-  getImages(@CurrentUser() user: any, @Query('page') page = 1, @Query('limit') limit = 20) {
-    return this.imagesService.getImages(user.id, +page, +limit);
+  getImages(
+    @CurrentUser() user: any,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+    @Query('projectId') projectId?: string,
+  ) {
+    const userId = typeof user === 'string' ? user : user?.id;
+    return this.imagesService.getImages(userId, +page, +limit, projectId);
   }
 
   @Delete(':id')

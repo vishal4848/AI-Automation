@@ -57,6 +57,7 @@ export class ImagesService {
       savedImage = await this.prisma.generatedImage.create({
         data: {
           userId,
+          projectId: dto.projectId || null,
           provider: result.provider,
           model: dto.model || 'flux-schnell',
           prompt: dto.prompt,
@@ -100,6 +101,7 @@ export class ImagesService {
       provider: result.provider,
       style: dto.style,
       ratio: dto.ratio,
+      projectId: dto.projectId || undefined,
       demo: result.demo,
       latencyMs: result.latencyMs,
       createdAt: new Date(),
@@ -108,16 +110,21 @@ export class ImagesService {
     return imageResult;
   }
 
-  async getImages(userId: string, page = 1, limit = 20) {
+  async getImages(userId: string, page = 1, limit = 20, projectId?: string) {
     try {
+      const whereClause: any = { userId };
+      if (projectId) {
+        whereClause.projectId = projectId;
+      }
+
       const [images, total] = await Promise.all([
         this.prisma.generatedImage.findMany({
-          where: { userId },
+          where: whereClause,
           orderBy: { createdAt: 'desc' },
           skip: (page - 1) * limit,
           take: limit,
         }),
-        this.prisma.generatedImage.count({ where: { userId } }),
+        this.prisma.generatedImage.count({ where: whereClause }),
       ]);
       return { images, total, page, pages: Math.ceil(total / limit) };
     } catch {

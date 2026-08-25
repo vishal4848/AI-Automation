@@ -33,6 +33,9 @@ export class GenerateImageDto {
   @IsBoolean() @IsOptional()
   enhancePrompt?: boolean = false;
 
+  @IsString() @IsOptional()
+  projectId?: string;
+
   @IsNumber() @IsOptional() @Min(1) @Max(4)
   numImages?: number = 1;
 }

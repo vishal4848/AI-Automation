@@ -7,7 +7,10 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const page = searchParams.get('page') || '1';
     const limit = searchParams.get('limit') || '20';
-    const response = await backendFetch(`/api/v1/images?page=${page}&limit=${limit}`, {}, req);
+    const projectId = searchParams.get('projectId');
+    const query = new URLSearchParams({ page, limit });
+    if (projectId) query.set('projectId', projectId);
+    const response = await backendFetch(`/api/v1/images?${query.toString()}`, {}, req);
     const data = await response.json();
     return NextResponse.json(data);
   } catch {

@@ -27,6 +27,8 @@ export default function AIImageStudio() {
   const [steps, setSteps] = useState(30);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [errorMsg, setErrorMsg] = useState('');
   const [imageToDelete, setImageToDelete] = useState<{ id?: string; url: string; prompt?: string } | null>(null);
@@ -48,6 +50,25 @@ export default function AIImageStudio() {
       }
     }
 
+    async function loadProjects() {
+      try {
+        const res = await fetch('/api/projects');
+        const data = await res.json();
+        const list = data.projects || [];
+        if (Array.isArray(list)) {
+          setProjects(list);
+          const activeSaved = localStorage.getItem('ai_automation_active_project_id');
+          if (activeSaved && list.some((p: any) => p.id === activeSaved)) {
+            setSelectedProjectId(activeSaved);
+          } else if (list.length > 0) {
+            setSelectedProjectId(list[0].id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load projects:', err);
+      }
+    }
+
     async function loadRecentImages() {
       try {
         const res = await fetch('/api/images?limit=20');
@@ -62,6 +83,7 @@ export default function AIImageStudio() {
     }
 
     loadModels();
+    loadProjects();
     loadRecentImages();
   }, []);
 
@@ -83,6 +105,7 @@ export default function AIImageStudio() {
           style: selectedStyle,
           ratio: selectedRatio,
           steps,
+          projectId: selectedProjectId || undefined,
         }),
       });
       const data = await res.json();
@@ -96,6 +119,7 @@ export default function AIImageStudio() {
           setGeneratedImages(prev => [newImgObj, ...prev]);
           queryClient.invalidateQueries({ queryKey: ['analytics'] });
           queryClient.invalidateQueries({ queryKey: ['content-library-images'] });
+          queryClient.invalidateQueries({ queryKey: ['workspace-projects'] });
         }
       } else {
         setErrorMsg(data.error || 'Failed to generate image. Please try again.');
@@ -295,6 +319,33 @@ export default function AIImageStudio() {
             Image Studio
           </h1>
         </div>
+
+        {/* Workspace Project Selector */}
+        {projects.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-zinc-300">Save to Project</label>
+              <span className="text-[10px] text-zinc-500">Optional</span>
+            </div>
+            <select
+              value={selectedProjectId}
+              onChange={(e) => {
+                setSelectedProjectId(e.target.value);
+                if (e.target.value) {
+                  localStorage.setItem('ai_automation_active_project_id', e.target.value);
+                }
+              }}
+              className="w-full p-2.5 rounded-xl bg-[#09090b] border border-white/[0.08] text-xs text-zinc-300 focus:border-violet-500 focus:outline-none transition-all"
+            >
+              <option value="">No Project (General Library)</option>
+              {projects.map((proj) => (
+                <option key={proj.id} value={proj.id}>
+                  📁 {proj.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="space-y-2">
           <label className="text-sm font-medium text-zinc-300">Prompt</label>

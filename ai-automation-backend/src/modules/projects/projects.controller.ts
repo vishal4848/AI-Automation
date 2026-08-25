@@ -11,31 +11,36 @@ export class ProjectsController {
   constructor(private readonly projectsService: ProjectsService) {}
 
   @Post()
-  async create(@CurrentUser('id') userId: string, @Body() dto: CreateProjectDto) {
+  async create(@CurrentUser() user: any, @Body() dto: CreateProjectDto) {
+    const userId = typeof user === 'string' ? user : user?.id;
     return this.projectsService.create(userId, dto);
   }
 
   @Get()
-  async findAll(@CurrentUser('id') userId: string) {
+  async findAll(@CurrentUser() user: any) {
+    const userId = typeof user === 'string' ? user : user?.id;
     return this.projectsService.findAll(userId);
   }
 
   @Get(':id')
-  async findOne(@CurrentUser('id') userId: string, @Param('id') id: string) {
+  async findOne(@CurrentUser() user: any, @Param('id') id: string) {
+    const userId = typeof user === 'string' ? user : user?.id;
     return this.projectsService.findOne(userId, id);
   }
 
   @Patch(':id')
   async update(
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: any,
     @Param('id') id: string,
     @Body() dto: UpdateProjectDto,
   ) {
+    const userId = typeof user === 'string' ? user : user?.id;
     return this.projectsService.update(userId, id, dto);
   }
 
   @Delete(':id')
-  async delete(@CurrentUser('id') userId: string, @Param('id') id: string) {
+  async delete(@CurrentUser() user: any, @Param('id') id: string) {
+    const userId = typeof user === 'string' ? user : user?.id;
     return this.projectsService.delete(userId, id);
   }
 }

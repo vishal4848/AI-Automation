@@ -33,10 +33,25 @@ export default function ContentLibraryPage() {
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'All' | 'Images' | 'Videos' | 'Captions' | 'Favorites'>('All');
+  const [selectedProjectFilter, setSelectedProjectFilter] = useState<string>('All');
   const [imageToDelete, setImageToDelete] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [previewImage, setPreviewImage] = useState<any | null>(null);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Fetch projects list for filter dropdown
+  const { data: projectsData } = useQuery({
+    queryKey: ['workspace-projects'],
+    queryFn: async () => {
+      const res = await fetch('/api/projects');
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json.projects || [];
+    },
+    staleTime: 5000,
+  });
+
+  const projects: any[] = Array.isArray(projectsData) ? projectsData : [];
 
   // Fetch real images from PostgreSQL through backend API
   const { data, isLoading, isError, refetch } = useQuery({
@@ -57,6 +72,12 @@ export default function ContentLibraryPage() {
   // Filter & Search Logic
   const filteredContent = useMemo(() => {
     return rawImages.filter((item) => {
+      // Project filter match
+      if (selectedProjectFilter !== 'All') {
+        if (selectedProjectFilter === 'no-project' && item.projectId) return false;
+        if (selectedProjectFilter !== 'no-project' && item.projectId !== selectedProjectFilter) return false;
+      }
+
       // Search query match
       const query = searchQuery.toLowerCase().trim();
       const promptMatch = item.prompt ? item.prompt.toLowerCase().includes(query) : false;
@@ -75,7 +96,7 @@ export default function ContentLibraryPage() {
 
       return true;
     });
-  }, [rawImages, searchQuery, activeFilter]);
+  }, [rawImages, searchQuery, activeFilter, selectedProjectFilter]);
 
   // Download Handler
   const handleDownload = async (url: string, prompt?: string) => {
@@ -241,6 +262,23 @@ export default function ContentLibraryPage() {
               </button>
             )}
           </div>
+
+          {/* Project Filter */}
+          {projects.length > 0 && (
+            <select
+              value={selectedProjectFilter}
+              onChange={(e) => setSelectedProjectFilter(e.target.value)}
+              className="px-3 py-2 bg-secondary/50 border border-border rounded-xl text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all max-w-[150px] truncate"
+            >
+              <option value="All">All Projects</option>
+              <option value="no-project">No Project</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  📁 {p.name}
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* View Switcher */}
           <div className="flex bg-secondary/50 p-1 rounded-xl border border-border">
