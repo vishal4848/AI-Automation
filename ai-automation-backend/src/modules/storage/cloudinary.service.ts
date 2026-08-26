@@ -4,11 +4,14 @@ import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 
 export interface UploadResult {
   url: string;
+  secureUrl: string;
   publicId: string;
   width?: number;
   height?: number;
   format?: string;
   bytes?: number;
+  duration?: number;
+  resourceType?: 'image' | 'video';
 }
 
 @Injectable()
@@ -32,8 +35,7 @@ export class CloudinaryService {
 
   async uploadBase64Image(base64: string, folder = 'ai-automation/images'): Promise<UploadResult> {
     if (!this.configured) {
-      // Passthrough: return the base64 as-is or generate a placeholder
-      return { url: base64, publicId: `local/${Date.now()}` };
+      return { url: base64, secureUrl: base64, publicId: `local/${Date.now()}` };
     }
     try {
       const result: UploadApiResponse = await cloudinary.uploader.upload(base64, {
@@ -41,24 +43,99 @@ export class CloudinaryService {
         resource_type: 'image',
         transformation: [{ quality: 'auto', fetch_format: 'auto' }],
       });
-      return { url: result.secure_url, publicId: result.public_id, width: result.width, height: result.height, format: result.format, bytes: result.bytes };
+      return {
+        url: result.secure_url || result.url,
+        secureUrl: result.secure_url,
+        publicId: result.public_id,
+        width: result.width,
+        height: result.height,
+        format: result.format,
+        bytes: result.bytes,
+        resourceType: 'image',
+      };
     } catch (error: any) {
       this.logger.error(`Cloudinary upload failed: ${error.message}`);
-      return { url: base64, publicId: `error/${Date.now()}` };
+      return { url: base64, secureUrl: base64, publicId: `error/${Date.now()}` };
     }
   }
 
   async uploadVideoUrl(videoUrl: string, folder = 'ai-automation/videos'): Promise<UploadResult> {
-    if (!this.configured) return { url: videoUrl, publicId: `local/${Date.now()}` };
+    if (!this.configured) return { url: videoUrl, secureUrl: videoUrl, publicId: `local/${Date.now()}` };
     try {
       const result: UploadApiResponse = await cloudinary.uploader.upload(videoUrl, {
         folder, resource_type: 'video',
       });
-      return { url: result.secure_url, publicId: result.public_id, bytes: result.bytes };
+      return {
+        url: result.secure_url || result.url,
+        secureUrl: result.secure_url,
+        publicId: result.public_id,
+        bytes: result.bytes,
+        duration: result.duration,
+        resourceType: 'video',
+      };
     } catch (error: any) {
       this.logger.error(`Cloudinary video upload failed: ${error.message}`);
-      return { url: videoUrl, publicId: `error/${Date.now()}` };
+      return { url: videoUrl, secureUrl: videoUrl, publicId: `error/${Date.now()}` };
     }
+  }
+
+  async uploadBuffer(
+    buffer: Buffer,
+    options: {
+      folder?: string;
+      resourceType?: 'image' | 'video' | 'auto';
+      fileName?: string;
+    } = {},
+  ): Promise<UploadResult> {
+    const resourceType = options.resourceType || 'auto';
+    const folder =
+      options.folder ||
+      (resourceType === 'video'
+        ? 'ai-automation/uploads/videos'
+        : 'ai-automation/uploads/images');
+
+    if (!this.configured) {
+      // Passthrough mode: create safe data URI for development without Cloudinary API credentials
+      const mime = resourceType === 'video' ? 'video/mp4' : 'image/png';
+      const base64 = buffer.toString('base64');
+      const dataUri = `data:${mime};base64,${base64}`;
+      return {
+        url: dataUri,
+        secureUrl: dataUri,
+        publicId: `local-upload/${Date.now()}`,
+        bytes: buffer.length,
+        resourceType: resourceType === 'video' ? 'video' : 'image',
+      };
+    }
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder,
+          resource_type: resourceType,
+          use_filename: Boolean(options.fileName),
+          filename_override: options.fileName,
+        },
+        (error, result) => {
+          if (error || !result) {
+            this.logger.error(`Cloudinary stream upload failed: ${error?.message}`);
+            return reject(error || new Error('Cloudinary upload failed'));
+          }
+          resolve({
+            url: result.secure_url || result.url,
+            secureUrl: result.secure_url,
+            publicId: result.public_id,
+            width: result.width,
+            height: result.height,
+            format: result.format,
+            bytes: result.bytes,
+            duration: result.duration,
+            resourceType: result.resource_type as 'image' | 'video',
+          });
+        },
+      );
+      uploadStream.end(buffer);
+    });
   }
 
   async deleteAsset(publicId: string, resourceType: 'image' | 'video' = 'image'): Promise<void> {

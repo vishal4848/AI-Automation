@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, type Variants } from 'framer-motion';
 import {
-  Image as ImageIcon, Video, Type, Hash, ArrowUpRight, Sparkles, Zap, Play, TrendingUp, Clock, Loader2, AlertCircle
+  Image as ImageIcon, Video, Type, Hash, ArrowUpRight, Sparkles, Zap, Play, TrendingUp, Clock, Loader2, AlertCircle, Upload
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { formatDistanceToNow } from 'date-fns';
@@ -79,6 +79,12 @@ export default function DashboardPage() {
               className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-primary to-cyan-500 text-white font-semibold shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(139,92,246,0.5)] transition-all transform hover:-translate-y-0.5 cursor-pointer"
             >
               <Sparkles className="w-4 h-4" /> Generate New Asset
+            </button>
+            <button 
+              onClick={() => router.push('/upload')}
+              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-white/5 border border-white/10 text-white font-semibold hover:bg-white/10 transition-all backdrop-blur-md cursor-pointer"
+            >
+              <Upload className="w-4 h-4" /> Upload from Device
             </button>
             <button 
               onClick={() => router.push('/content-library')}

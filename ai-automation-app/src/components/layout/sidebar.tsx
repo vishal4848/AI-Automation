@@ -9,6 +9,7 @@ import {
   Video,
   Type,
   Hash,
+  Upload,
   LayoutDashboard,
   Library,
   CalendarDays,
@@ -36,6 +37,7 @@ export const NAV_ITEMS = {
     { name: 'AI Video', href: '/ai-video', icon: Video },
     { name: 'AI Caption', href: '/ai-caption', icon: Type },
     { name: 'Hashtags', href: '/hashtag', icon: Hash },
+    { name: 'Upload from Device', href: '/upload', icon: Upload },
   ],
   manage: [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },

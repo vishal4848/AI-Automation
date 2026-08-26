@@ -31,6 +31,7 @@ model User {
   socialAccounts SocialAccount[]
   scheduledPosts ScheduledPost[]
   projects      Project[]
+  uploadedAssets UploadedAsset[]
   
   @@map("users")
 }
@@ -338,6 +339,7 @@ model ScheduledPost {
   socialAccountId String
   platform        String
   mediaUrl        String
+  uploadedAssetId String?
   caption         String?  @db.Text
   scheduledAtUTC  DateTime?
   status          String   @default("SCHEDULED") // SCHEDULED, PROCESSING, PUBLISHED, FAILED, CANCELLED
@@ -348,9 +350,11 @@ model ScheduledPost {
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   socialAccount   SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  uploadedAsset   UploadedAsset? @relation(fields: [uploadedAssetId], references: [id], onDelete: SetNull)
 
   @@index([userId, status])
   @@index([scheduledAtUTC, status])
+  @@index([uploadedAssetId])
   @@map("scheduled_posts")
 }
 
@@ -363,9 +367,40 @@ model Project {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  images      GeneratedImage[]
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images         GeneratedImage[]
+  uploadedAssets UploadedAsset[]
 
   @@index([userId, status])
   @@map("projects")
 }
+
+model UploadedAsset {
+  id                 String          @id @default(cuid())
+  userId             String
+  fileName           String
+  originalName       String
+  mimeType           String
+  resourceType       String          @default("image") // "image" | "video"
+  url                String
+  secureUrl          String
+  cloudinaryPublicId String?
+  format             String?
+  width              Int?
+  height             Int?
+  duration           Float?
+  fileSize           Int?
+  source             String          @default("UPLOAD")
+  projectId          String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project            Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  scheduledPosts     ScheduledPost[]
+
+  @@index([userId, resourceType])
+  @@index([userId, projectId])
+  @@map("uploaded_assets")
+}
+

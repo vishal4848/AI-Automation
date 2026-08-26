@@ -57,31 +57,57 @@ export default function SchedulerPage() {
         } 
       });
 
-    // Fetch images
-    fetch('/api/images')
-      .then(r => r.json())
-      .then(d => {
-        if (d.success) {
-          const imgs = extractArray(d);
-          setImages(imgs);
-          const currentParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-          const incomingMedia = currentParams?.get('mediaUrl');
-          if (imgs.length > 0 && !incomingMedia) {
-            setMediaUrl(prev => prev || imgs[0].url);
-          }
-        }
-      });
+    // Fetch images and uploaded assets for media picker
+    Promise.all([
+      fetch('/api/images').then(r => r.json()).catch(() => ({})),
+      fetch('/api/assets').then(r => r.json()).catch(() => ({})),
+    ]).then(([imgRes, assetRes]) => {
+      const imgs = extractArray(imgRes).map((i: any) => ({
+        id: i.id,
+        url: i.secureUrl || i.url,
+        prompt: i.prompt || 'Generated Image',
+        source: 'AI_GENERATED',
+      }));
+      const assets = extractArray(assetRes).map((a: any) => ({
+        id: a.id,
+        url: a.secureUrl || a.url,
+        prompt: a.fileName || a.originalName || 'Uploaded Media',
+        source: 'UPLOAD',
+      }));
+      const combined = [...imgs, ...assets];
+      setImages(combined);
+      const currentParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      const incomingMedia = currentParams?.get('mediaUrl');
+      if (combined.length > 0 && !incomingMedia) {
+        setMediaUrl(prev => prev || combined[0].url);
+      }
+    });
 
-    // Handle incoming navigation parameters from Image Studio or Content Library
+    // Handle incoming navigation parameters from Image Studio, Content Library, or Upload page
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const paramMedia = params.get('mediaUrl');
       const paramCaption = params.get('caption');
       const paramAutoOpen = params.get('autoOpen');
+      const paramAssetId = params.get('assetId');
 
       if (paramMedia) setMediaUrl(decodeURIComponent(paramMedia));
       if (paramCaption) setCaption(decodeURIComponent(paramCaption));
       if (paramAutoOpen === 'true' || paramMedia) setIsCreateOpen(true);
+
+      if (paramAssetId) {
+        fetch(`/api/assets/${paramAssetId}`)
+          .then(r => r.json())
+          .then(d => {
+            const asset = d.data || d;
+            if (asset && (asset.secureUrl || asset.url)) {
+              setMediaUrl(asset.secureUrl || asset.url);
+              setCaption(prev => prev || asset.fileName || 'Uploaded Media');
+              setIsCreateOpen(true);
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, []);
 
@@ -283,7 +309,7 @@ export default function SchedulerPage() {
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Select Generated Image</label>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Select Media Asset (Generated or Uploaded)</label>
                   <Select value={mediaUrl} onValueChange={(val) => setMediaUrl(val || '')}>
                     <SelectTrigger className="bg-secondary/50 rounded-xl">
                       <SelectValue placeholder="Select image..." />
