@@ -457,7 +457,23 @@ export default function WorkspacePage() {
                     <span className="text-[10px] text-white/90 line-clamp-2">{img.prompt}</span>
                     <div className="flex justify-end gap-1.5">
                       <button
-                        onClick={() => router.push(`/scheduler?mediaUrl=${encodeURIComponent(img.url)}&caption=${encodeURIComponent(img.prompt || '')}&autoOpen=true`)}
+                        onClick={() => {
+                          try {
+                            sessionStorage.setItem(
+                              'scheduler_prefill',
+                              JSON.stringify({
+                                mediaUrl: img.url,
+                                caption: img.prompt || '',
+                                imageId: img.id,
+                              }),
+                            );
+                          } catch {}
+                          const isShort = img.url && !img.url.startsWith('data:') && img.url.length < 500;
+                          let targetUrl = `/scheduler?autoOpen=true`;
+                          if (img.id) targetUrl += `&imageId=${encodeURIComponent(img.id)}`;
+                          if (isShort) targetUrl += `&mediaUrl=${encodeURIComponent(img.url)}&caption=${encodeURIComponent(img.prompt || '')}`;
+                          router.push(targetUrl);
+                        }}
                         className="p-1.5 bg-white/20 hover:bg-cyan-500 text-white rounded-lg transition-colors"
                         title="Schedule"
                       >

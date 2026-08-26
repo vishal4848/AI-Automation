@@ -206,7 +206,30 @@ export default function ContentLibraryPage() {
   const handleSchedule = (item: any) => {
     const url = item.secureUrl || item.url;
     const itemPrompt = item.displayName || item.prompt || 'Shared from AI Automation';
-    router.push(`/scheduler?mediaUrl=${encodeURIComponent(url)}&caption=${encodeURIComponent(itemPrompt)}&autoOpen=true`);
+
+    try {
+      sessionStorage.setItem(
+        'scheduler_prefill',
+        JSON.stringify({
+          mediaUrl: url,
+          caption: itemPrompt,
+          assetId: item.source === 'UPLOAD' ? item.id : undefined,
+          imageId: item.source === 'AI_GENERATED' ? item.id : undefined,
+        }),
+      );
+    } catch {}
+
+    const isShortHttp = url && !url.startsWith('data:') && url.length < 500;
+    let targetUrl = `/scheduler?autoOpen=true`;
+    if (item.source === 'UPLOAD' && item.id) {
+      targetUrl += `&assetId=${encodeURIComponent(item.id)}`;
+    } else if (item.id) {
+      targetUrl += `&imageId=${encodeURIComponent(item.id)}`;
+    }
+    if (isShortHttp) {
+      targetUrl += `&mediaUrl=${encodeURIComponent(url)}&caption=${encodeURIComponent(itemPrompt)}`;
+    }
+    router.push(targetUrl);
   };
 
   // Delete Handler with in-use protection

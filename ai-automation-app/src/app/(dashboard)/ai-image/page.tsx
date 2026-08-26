@@ -200,7 +200,28 @@ export default function AIImageStudio() {
   const handleSchedule = (img: any) => {
     const url = typeof img === 'object' ? img.url : img;
     const imgPrompt = (typeof img === 'object' ? img.prompt : '') || prompt || 'Generated with AI Automation';
-    router.push(`/scheduler?mediaUrl=${encodeURIComponent(url)}&caption=${encodeURIComponent(imgPrompt)}&autoOpen=true`);
+    const id = typeof img === 'object' ? img.id : undefined;
+
+    try {
+      sessionStorage.setItem(
+        'scheduler_prefill',
+        JSON.stringify({
+          mediaUrl: url,
+          caption: imgPrompt,
+          imageId: id,
+        }),
+      );
+    } catch {}
+
+    const isShortHttp = url && !url.startsWith('data:') && url.length < 500;
+    let targetUrl = `/scheduler?autoOpen=true`;
+    if (id) {
+      targetUrl += `&imageId=${encodeURIComponent(id)}`;
+    }
+    if (isShortHttp) {
+      targetUrl += `&mediaUrl=${encodeURIComponent(url)}&caption=${encodeURIComponent(imgPrompt)}`;
+    }
+    router.push(targetUrl);
   };
 
   const handleDeleteClick = (img: any) => {

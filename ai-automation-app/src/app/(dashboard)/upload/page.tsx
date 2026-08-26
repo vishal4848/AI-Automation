@@ -233,11 +233,28 @@ export default function UploadPage() {
     if (!uploadedAsset) return;
     const mediaUrl = uploadedAsset.secureUrl || uploadedAsset.url;
     const caption = uploadedAsset.fileName || 'Uploaded Media';
-    router.push(
-      `/scheduler?mediaUrl=${encodeURIComponent(mediaUrl)}&caption=${encodeURIComponent(
-        caption,
-      )}&autoOpen=true`,
-    );
+
+    try {
+      sessionStorage.setItem(
+        'scheduler_prefill',
+        JSON.stringify({
+          mediaUrl,
+          caption,
+          assetId: uploadedAsset.id,
+        }),
+      );
+    } catch {}
+
+    const isShortHttp =
+      mediaUrl &&
+      !mediaUrl.startsWith('data:') &&
+      mediaUrl.length < 500;
+
+    let targetUrl = `/scheduler?assetId=${encodeURIComponent(uploadedAsset.id)}&autoOpen=true`;
+    if (isShortHttp) {
+      targetUrl += `&mediaUrl=${encodeURIComponent(mediaUrl)}&caption=${encodeURIComponent(caption)}`;
+    }
+    router.push(targetUrl);
   };
 
   const formatBytes = (bytes?: number) => {

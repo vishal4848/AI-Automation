@@ -83,17 +83,35 @@ export default function SchedulerPage() {
       }
     });
 
-    // Handle incoming navigation parameters from Image Studio, Content Library, or Upload page
+    // Handle prefill from sessionStorage (avoids huge query strings and HTTP 431 errors)
     if (typeof window !== 'undefined') {
+      try {
+        const stored = sessionStorage.getItem('scheduler_prefill');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          sessionStorage.removeItem('scheduler_prefill');
+          if (parsed.mediaUrl) setMediaUrl(parsed.mediaUrl);
+          if (parsed.caption) setCaption(parsed.caption);
+          setIsCreateOpen(true);
+        }
+      } catch {}
+
       const params = new URLSearchParams(window.location.search);
       const paramMedia = params.get('mediaUrl');
       const paramCaption = params.get('caption');
       const paramAutoOpen = params.get('autoOpen');
       const paramAssetId = params.get('assetId');
+      const paramImageId = params.get('imageId');
 
-      if (paramMedia) setMediaUrl(decodeURIComponent(paramMedia));
-      if (paramCaption) setCaption(decodeURIComponent(paramCaption));
-      if (paramAutoOpen === 'true' || paramMedia) setIsCreateOpen(true);
+      if (paramMedia && !paramMedia.startsWith('data:') && paramMedia.length < 1000) {
+        setMediaUrl(decodeURIComponent(paramMedia));
+      }
+      if (paramCaption && paramCaption.length < 1000) {
+        setCaption(decodeURIComponent(paramCaption));
+      }
+      if (paramAutoOpen === 'true' || paramMedia || paramAssetId || paramImageId) {
+        setIsCreateOpen(true);
+      }
 
       if (paramAssetId) {
         fetch(`/api/assets/${paramAssetId}`)
