@@ -361,34 +361,33 @@ export default function SocialAccountsPage() {
 
             <form onSubmit={handleTokenConnect} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground">Meta Access Token (User or Page Token)</label>
+                <label className="text-xs font-semibold text-foreground">Access Token (Meta or LinkedIn OAuth Token)</label>
                 <textarea
                   rows={4}
                   value={tokenInput}
                   onChange={(e) => setTokenInput(e.target.value)}
-                  placeholder="Paste token starting with EAAB... or EAA..."
+                  placeholder="Paste Meta Token (starts with EAA...) or LinkedIn Access Token (starts with AQ...)"
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary/40"
                   required
                 />
               </div>
 
-              <div className="p-3 bg-accent/40 rounded-xl text-xs space-y-1.5 text-muted-foreground">
+              <div className="p-3 bg-accent/40 rounded-xl text-xs space-y-2 text-muted-foreground">
                 <div className="flex items-center justify-between font-semibold text-foreground">
-                  <span>How to generate a token in 30 seconds:</span>
+                  <span>How to get an Access Token:</span>
                   <a
                     href="https://developers.facebook.com/tools/explorer/"
                     target="_blank"
                     rel="noreferrer"
                     className="text-primary inline-flex items-center gap-1 hover:underline"
                   >
-                    Open Graph API Explorer <ExternalLink className="w-3 h-3" />
+                    Meta Graph Explorer <ExternalLink className="w-3 h-3" />
                   </a>
                 </div>
-                <ol className="list-decimal list-inside space-y-1 text-[11px] leading-relaxed">
-                  <li>In Graph API Explorer, select your App and click <strong>Generate Access Token</strong>.</li>
-                  <li>Grant permissions: <code className="bg-background px-1 py-0.5 rounded">pages_manage_posts</code>, <code className="bg-background px-1 py-0.5 rounded">pages_read_engagement</code>, and <code className="bg-background px-1 py-0.5 rounded">instagram_basic</code>.</li>
-                  <li>Copy the generated token and paste it above!</li>
-                </ol>
+                <ul className="list-disc list-inside space-y-1 text-[11px] leading-relaxed">
+                  <li><strong>Meta (Instagram / Facebook):</strong> Select your app in Graph Explorer, grant permissions (<code className="bg-background px-1 py-0.5 rounded">pages_manage_posts</code>, <code className="bg-background px-1 py-0.5 rounded">instagram_basic</code>), and click Generate Access Token.</li>
+                  <li><strong>LinkedIn:</strong> Generate a token with <code className="bg-background px-1 py-0.5 rounded">w_member_social</code> and <code className="bg-background px-1 py-0.5 rounded">openid profile</code> scopes, or use the <strong>Connect LinkedIn</strong> button directly.</li>
+                </ul>
               </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-2">

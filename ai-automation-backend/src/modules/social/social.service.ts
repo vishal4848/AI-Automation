@@ -400,6 +400,27 @@ export class SocialService {
 
     const savedAccounts: any[] = [];
 
+    // 1. Check if provided token is a LinkedIn OAuth Access Token
+    try {
+      const liRes = await fetch('https://api.linkedin.com/v2/userinfo', {
+        headers: { Authorization: `Bearer ${cleanToken}` },
+      });
+      if (liRes.ok) {
+        const liData = await liRes.json();
+        if (liData.sub) {
+          const memberUrn = liData.sub.startsWith('urn:li:person:') ? liData.sub : `urn:li:person:${liData.sub}`;
+          const memberName = liData.name || `${liData.given_name || ''} ${liData.family_name || ''}`.trim() || 'LinkedIn Member';
+          const encryptedToken = encrypt(cleanToken, encryptionKey);
+          const savedLi = await this.prisma.socialAccount.upsert({
+            where: { platform_platformUserId: { platform: 'LinkedIn', platformUserId: memberUrn } },
+            update: { userId, username: memberName, accessTokenEncrypted: encryptedToken, status: 'CONNECTED' },
+            create: { userId, platform: 'LinkedIn', platformUserId: memberUrn, username: memberName, accessTokenEncrypted: encryptedToken, status: 'CONNECTED' },
+          });
+          return [savedLi];
+        }
+      }
+    } catch {}
+
     try {
       const pagesUrl = `https://graph.facebook.com/${version}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username}&access_token=${encodeURIComponent(cleanToken)}`;
       const pagesRes = await fetch(pagesUrl);

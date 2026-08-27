@@ -10,7 +10,7 @@ describe('LinkedInPublisher', () => {
 
   const mockConfig = {
     get: jest.fn().mockImplementation((key: string) => {
-      if (key === 'LINKEDIN_API_VERSION') return '202401';
+      if (key === 'LINKEDIN_API_VERSION') return '202601';
       if (key === 'TOKEN_ENCRYPTION_KEY') return encryptionKey;
       return null;
     }),
@@ -115,7 +115,7 @@ describe('LinkedInPublisher', () => {
           method: 'POST',
           headers: expect.objectContaining({
             'Authorization': 'Bearer AQX_mock_token',
-            'LinkedIn-Version': '202401',
+            'LinkedIn-Version': '202601',
           }),
         })
       );

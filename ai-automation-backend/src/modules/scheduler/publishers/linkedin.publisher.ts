@@ -4,6 +4,8 @@ import { ScheduledPost, SocialAccount } from '@prisma/client';
 import { SocialPublisher } from './social-publisher.interface';
 import { decrypt } from '../../../common/utils/encryption.util';
 
+const SUPPORTED_VERSIONS = ['202601', '202603', '202503'];
+
 @Injectable()
 export class LinkedInPublisher implements SocialPublisher {
   private readonly logger = new Logger(LinkedInPublisher.name);
@@ -21,14 +23,17 @@ export class LinkedInPublisher implements SocialPublisher {
     if (!account.accessTokenEncrypted) {
       throw new Error('LINKEDIN_TOKEN_EXPIRED: Missing access token. Please reconnect your LinkedIn account.');
     }
-    if (!post.mediaUrl || typeof post.mediaUrl !== 'string') {
-      throw new Error('LINKEDIN_MEDIA_INVALID: Media URL is required.');
-    }
-    if (post.mediaUrl.includes('localhost') || post.mediaUrl.includes('127.0.0.1')) {
-      throw new Error('LINKEDIN_MEDIA_INVALID: Localhost URLs cannot be accessed by LinkedIn. Please use a public Cloudinary URL.');
-    }
-    if (!post.mediaUrl.startsWith('https://') && !post.mediaUrl.startsWith('http://')) {
-      throw new Error('LINKEDIN_MEDIA_INVALID: Media URL must be a valid public HTTPS link.');
+    if (post.mediaUrl && typeof post.mediaUrl === 'string') {
+      if (post.mediaUrl.includes('localhost') || post.mediaUrl.includes('127.0.0.1')) {
+        throw new Error('LINKEDIN_MEDIA_INVALID: Localhost URLs cannot be accessed by LinkedIn.');
+      }
+      if (
+        !post.mediaUrl.startsWith('https://') &&
+        !post.mediaUrl.startsWith('http://') &&
+        !post.mediaUrl.startsWith('data:')
+      ) {
+        throw new Error('LINKEDIN_MEDIA_INVALID: Media URL must be a valid HTTPS link or data URI.');
+      }
     }
     return true;
   }
@@ -36,7 +41,10 @@ export class LinkedInPublisher implements SocialPublisher {
   async publish(account: SocialAccount, post: ScheduledPost): Promise<string> {
     await this.validate(account, post);
 
-    const version = this.configService.get<string>('LINKEDIN_API_VERSION') || '202401';
+    const configuredVersion = this.configService.get<string>('LINKEDIN_API_VERSION');
+    const primaryVersion = configuredVersion && configuredVersion !== '202401' ? configuredVersion : '202601';
+    const versionsToTry = [primaryVersion, ...SUPPORTED_VERSIONS.filter((v) => v !== primaryVersion)];
+
     const encryptionKey = this.configService.get<string>('TOKEN_ENCRYPTION_KEY') || 'dev-token-encryption-key-32-chars-long';
 
     let accessToken: string;
@@ -47,25 +55,88 @@ export class LinkedInPublisher implements SocialPublisher {
     }
 
     const authorUrn = this.resolveAuthorUrn(account);
-    const isVideo = this.isVideoUrl(post.mediaUrl);
+    const hasMedia = Boolean(post.mediaUrl && post.mediaUrl.trim());
+    const isVideo = hasMedia && this.isVideoUrl(post.mediaUrl);
 
-    try {
-      if (isVideo) {
-        return await this.publishVideoPost(authorUrn, accessToken, version, post);
-      } else {
-        return await this.publishImagePost(authorUrn, accessToken, version, post);
+    let lastError: any = null;
+
+    for (const version of versionsToTry) {
+      try {
+        if (!hasMedia) {
+          return await this.publishTextPost(authorUrn, accessToken, version, post);
+        } else if (isVideo) {
+          return await this.publishVideoPost(authorUrn, accessToken, version, post);
+        } else {
+          return await this.publishImagePost(authorUrn, accessToken, version, post);
+        }
+      } catch (error: any) {
+        lastError = error;
+        // If the error is an inactive version (426), try next active version in fallback list
+        if (error.message && error.message.includes('not active')) {
+          this.logger.warn(`LinkedIn version ${version} not active; attempting fallback version...`);
+          continue;
+        }
+        // For other errors, don't loop endlessly
+        break;
       }
-    } catch (error: any) {
-      const sanitized = this.sanitize(error.message);
-      this.logger.error(`Failed to publish to LinkedIn: ${sanitized}`);
-      throw new Error(sanitized);
     }
+
+    const sanitized = this.sanitize(lastError?.message || 'LinkedIn publishing failed');
+    this.logger.error(`Failed to publish to LinkedIn: ${sanitized}`);
+    throw new Error(sanitized);
+  }
+
+  /**
+   * Publishes a text-only post to LinkedIn.
+   */
+  private async publishTextPost(
+    authorUrn: string,
+    accessToken: string,
+    version: string,
+    post: ScheduledPost,
+  ): Promise<string> {
+    const postRes = await fetch('https://api.linkedin.com/rest/posts', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'LinkedIn-Version': version,
+        'X-Restli-Protocol-Version': '2.0.0',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        author: authorUrn,
+        commentary: post.caption || '',
+        visibility: 'PUBLIC',
+        distribution: {
+          feedDistribution: 'MAIN_FEED',
+          targetEntities: [],
+          thirdPartyDistributionChannels: [],
+        },
+        lifecycleState: 'PUBLISHED',
+        isReshareDisabledByAuthor: false,
+      }),
+    });
+
+    if (!postRes.ok && postRes.status !== 201) {
+      const errData = await postRes.json().catch(() => ({}));
+      this.handleLinkedInError(errData, postRes.status);
+    }
+
+    const externalPostId =
+      postRes.headers.get('x-restli-id') || postRes.headers.get('x-linkedin-id') || `urn:li:post:${Date.now()}`;
+    this.logger.log(`Published text post to LinkedIn (${authorUrn}) successfully. Post ID: ${externalPostId}`);
+    return externalPostId;
   }
 
   /**
    * Publishes an image post to LinkedIn using the official REST Images and Posts APIs.
    */
-  private async publishImagePost(authorUrn: string, accessToken: string, version: string, post: ScheduledPost): Promise<string> {
+  private async publishImagePost(
+    authorUrn: string,
+    accessToken: string,
+    version: string,
+    post: ScheduledPost,
+  ): Promise<string> {
     // 1. Initialize image upload
     const initRes = await fetch('https://api.linkedin.com/rest/images?action=initializeUpload', {
       method: 'POST',
@@ -82,32 +153,28 @@ export class LinkedInPublisher implements SocialPublisher {
       }),
     });
 
-    const initData = await initRes.json();
+    const initData = await initRes.json().catch(() => ({}));
     if (!initRes.ok || initData.error || !initData.value) {
       this.handleLinkedInError(initData, initRes.status);
     }
 
-    const uploadUrl = initData.value.uploadUrl;
-    const imageUrn = initData.value.image;
+    const uploadUrl = initData.value?.uploadUrl;
+    const imageUrn = initData.value?.image;
 
     if (!uploadUrl || !imageUrn) {
       throw new Error('LINKEDIN_UPLOAD_FAILED: No upload URL or image URN returned from LinkedIn.');
     }
 
-    // 2. Fetch media binary from Cloudinary
-    const mediaRes = await fetch(post.mediaUrl);
-    if (!mediaRes.ok) {
-      throw new Error(`LINKEDIN_MEDIA_INVALID: Failed to fetch image binary from Cloudinary URL (Status: ${mediaRes.status}).`);
-    }
-    const mediaBuffer = await mediaRes.arrayBuffer();
+    // 2. Fetch or extract media binary
+    const { buffer: mediaBuffer, contentType } = await this.getMediaBuffer(post.mediaUrl);
 
     // 3. Upload binary to LinkedIn upload URL
     const uploadRes = await fetch(uploadUrl, {
       method: 'PUT',
       headers: {
-        'Content-Type': mediaRes.headers.get('content-type') || 'image/jpeg',
+        'Content-Type': contentType || 'image/jpeg',
       },
-      body: mediaBuffer,
+      body: mediaBuffer as any,
     });
 
     if (!uploadRes.ok && uploadRes.status !== 201) {
@@ -148,7 +215,8 @@ export class LinkedInPublisher implements SocialPublisher {
       this.handleLinkedInError(errData, postRes.status);
     }
 
-    const externalPostId = postRes.headers.get('x-restli-id') || postRes.headers.get('x-linkedin-id') || imageUrn;
+    const externalPostId =
+      postRes.headers.get('x-restli-id') || postRes.headers.get('x-linkedin-id') || imageUrn;
     this.logger.log(`Published image post to LinkedIn (${authorUrn}) successfully. Post ID: ${externalPostId}`);
     return externalPostId;
   }
@@ -156,13 +224,14 @@ export class LinkedInPublisher implements SocialPublisher {
   /**
    * Publishes a video post to LinkedIn with asynchronous processing status polling.
    */
-  private async publishVideoPost(authorUrn: string, accessToken: string, version: string, post: ScheduledPost): Promise<string> {
-    // 1. Fetch video binary from Cloudinary to determine byte size
-    const mediaRes = await fetch(post.mediaUrl);
-    if (!mediaRes.ok) {
-      throw new Error(`LINKEDIN_MEDIA_INVALID: Failed to fetch video binary from Cloudinary URL (Status: ${mediaRes.status}).`);
-    }
-    const mediaBuffer = await mediaRes.arrayBuffer();
+  private async publishVideoPost(
+    authorUrn: string,
+    accessToken: string,
+    version: string,
+    post: ScheduledPost,
+  ): Promise<string> {
+    // 1. Fetch video binary
+    const { buffer: mediaBuffer } = await this.getMediaBuffer(post.mediaUrl);
 
     // 2. Initialize video upload
     const initRes = await fetch('https://api.linkedin.com/rest/videos?action=initializeUpload', {
@@ -183,13 +252,13 @@ export class LinkedInPublisher implements SocialPublisher {
       }),
     });
 
-    const initData = await initRes.json();
+    const initData = await initRes.json().catch(() => ({}));
     if (!initRes.ok || initData.error || !initData.value) {
       this.handleLinkedInError(initData, initRes.status);
     }
 
-    const uploadInstructions = initData.value.uploadInstructions;
-    const videoUrn = initData.value.video;
+    const uploadInstructions = initData.value?.uploadInstructions;
+    const videoUrn = initData.value?.video;
 
     if (!uploadInstructions || uploadInstructions.length === 0 || !videoUrn) {
       throw new Error('LINKEDIN_UPLOAD_FAILED: Missing video upload instructions from LinkedIn.');
@@ -203,7 +272,7 @@ export class LinkedInPublisher implements SocialPublisher {
       headers: {
         'Content-Type': 'video/mp4',
       },
-      body: mediaBuffer,
+      body: mediaBuffer as any,
     });
 
     if (!uploadRes.ok && uploadRes.status !== 201) {
@@ -227,7 +296,7 @@ export class LinkedInPublisher implements SocialPublisher {
       });
 
       if (statusRes.ok) {
-        const statusData = await statusRes.json();
+        const statusData = await statusRes.json().catch(() => ({}));
         if (statusData.status === 'AVAILABLE') {
           videoReady = true;
           break;
@@ -275,9 +344,35 @@ export class LinkedInPublisher implements SocialPublisher {
       this.handleLinkedInError(errData, postRes.status);
     }
 
-    const externalPostId = postRes.headers.get('x-restli-id') || postRes.headers.get('x-linkedin-id') || videoUrn;
+    const externalPostId =
+      postRes.headers.get('x-restli-id') || postRes.headers.get('x-linkedin-id') || videoUrn;
     this.logger.log(`Published video post to LinkedIn (${authorUrn}) successfully. Post ID: ${externalPostId}`);
     return externalPostId;
+  }
+
+  private async getMediaBuffer(mediaUrl: string): Promise<{ buffer: Buffer; contentType: string }> {
+    if (mediaUrl.startsWith('data:')) {
+      const match = mediaUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        return {
+          contentType: match[1],
+          buffer: Buffer.from(match[2], 'base64'),
+        };
+      }
+    }
+
+    const mediaRes = await fetch(mediaUrl);
+    if (!mediaRes.ok) {
+      throw new Error(`LINKEDIN_MEDIA_INVALID: Failed to fetch media from URL (Status: ${mediaRes.status}).`);
+    }
+
+    const arrayBuf = await mediaRes.arrayBuffer();
+    return {
+      contentType:
+        mediaRes.headers.get('content-type') ||
+        (this.isVideoUrl(mediaUrl) ? 'video/mp4' : 'image/jpeg'),
+      buffer: Buffer.from(arrayBuf),
+    };
   }
 
   private resolveAuthorUrn(account: SocialAccount): string {
@@ -304,12 +399,24 @@ export class LinkedInPublisher implements SocialPublisher {
   }
 
   private handleLinkedInError(errorData: any, statusCode: number): never {
-    const errorMsg = errorData?.message || errorData?.error?.message || errorData?.description || `LinkedIn API error (Status: ${statusCode})`;
+    const errorMsg =
+      errorData?.message ||
+      errorData?.error?.message ||
+      errorData?.description ||
+      `LinkedIn API error (Status: ${statusCode})`;
 
-    if (statusCode === 401 || errorMsg.toLowerCase().includes('token') || errorMsg.toLowerCase().includes('expired')) {
+    if (
+      statusCode === 401 ||
+      errorMsg.toLowerCase().includes('token') ||
+      errorMsg.toLowerCase().includes('expired')
+    ) {
       throw new Error(`LINKEDIN_TOKEN_EXPIRED: ${errorMsg}`);
     }
-    if (statusCode === 403 || errorMsg.toLowerCase().includes('permission') || errorMsg.toLowerCase().includes('access denied')) {
+    if (
+      statusCode === 403 ||
+      errorMsg.toLowerCase().includes('permission') ||
+      errorMsg.toLowerCase().includes('access denied')
+    ) {
       throw new Error(`LINKEDIN_PERMISSION_DENIED: ${errorMsg}`);
     }
     if (statusCode === 429 || errorMsg.toLowerCase().includes('rate limit')) {
