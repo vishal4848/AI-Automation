@@ -19,18 +19,18 @@ export class SocialController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Get('instagram/connect')
-  connectInstagramRedirect(@CurrentUser() user: any, @Res() res: any) {
+  connectInstagramRedirect(@CurrentUser() user: any, @Query('flow') flow: string, @Res() res: any) {
     const userId = typeof user === 'string' ? user : user?.id;
-    const url = this.socialService.getInstagramConnectUrl(userId);
+    const url = this.socialService.getInstagramConnectUrl(userId, flow);
     return res.redirect(url);
   }
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Get('instagram/connect-url')
-  getInstagramConnectUrl(@CurrentUser() user: any) {
+  getInstagramConnectUrl(@CurrentUser() user: any, @Query('flow') flow: string) {
     const userId = typeof user === 'string' ? user : user?.id;
-    const url = this.socialService.getInstagramConnectUrl(userId);
+    const url = this.socialService.getInstagramConnectUrl(userId, flow);
     return { success: true, url };
   }
 
@@ -55,7 +55,8 @@ export class SocialController {
     }
 
     try {
-      await this.socialService.handleInstagramCallback(code, state);
+      const cleanCode = code ? code.replace(/#.*$/, '').trim() : code;
+      await this.socialService.handleInstagramCallback(cleanCode, state);
       return res.redirect(`${frontendUrl}/social-accounts?success=instagram_connected`);
     } catch (e: any) {
       return res.redirect(`${frontendUrl}/social-accounts?error=${encodeURIComponent(e.message)}`);

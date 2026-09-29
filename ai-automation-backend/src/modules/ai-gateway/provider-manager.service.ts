@@ -5,6 +5,7 @@ import { FalProvider } from '../providers/fal/fal.provider';
 import { OpenAIProvider } from '../providers/openai/openai.provider';
 import { GeminiProvider } from '../providers/gemini/gemini.provider';
 import { LocalProvider } from '../providers/local/local.provider';
+import { ReplicateProvider } from '../ai/providers/replicate.provider';
 
 @Injectable()
 export class ProviderManagerService {
@@ -17,6 +18,7 @@ export class ProviderManagerService {
     private openai: OpenAIProvider,
     private gemini: GeminiProvider,
     private local: LocalProvider,
+    private replicate: ReplicateProvider,
   ) {
     this.providers = new Map<string, AIProvider>([
       ['huggingface', hf] as [string, AIProvider],
@@ -24,11 +26,12 @@ export class ProviderManagerService {
       ['openai', openai] as [string, AIProvider],
       ['gemini', gemini] as [string, AIProvider],
       ['local', local] as [string, AIProvider],
+      ['replicate', replicate] as [string, AIProvider],
     ]);
   }
 
   getProvider(name: string): AIProvider | undefined {
-    return this.providers.get(name);
+    return this.providers.get(name.toLowerCase());
   }
 
   getAvailableProviders(): string[] {
@@ -38,11 +41,38 @@ export class ProviderManagerService {
   }
 
   getProviderForModel(modelId: string): AIProvider {
-    // Auto-route: find provider that supports this model
-    if (['flux-schnell', 'flux-dev', 'sd3', 'sdxl'].includes(modelId)) return this.hf;
-    if (['wan-t2v', 'kling-video', 'luma-dream-machine'].includes(modelId)) return this.fal;
-    if (['dall-e-3', 'dall-e-2'].includes(modelId)) return this.openai;
-    if (['imagen-3', 'imagen-2'].includes(modelId)) return this.gemini;
+    const lower = (modelId || '').toLowerCase();
+
+    // Replicate models
+    if (
+      [
+        'nano-banana-2',
+        'nano-banana-pro',
+        'flux-2-max',
+        'qwen-image-3-pro',
+        'wan-3',
+        'seedance',
+        'kling',
+        'veo',
+      ].includes(lower)
+    ) {
+      return this.replicate;
+    }
+
+    if (
+      lower.startsWith('replicate/') ||
+      this.replicate.supportedImageModels.includes(lower) ||
+      this.replicate.supportedVideoModels.includes(lower)
+    ) {
+      return this.replicate;
+    }
+
+    // Existing model routing
+    if (['flux-schnell', 'flux-dev', 'sd3', 'sdxl'].includes(lower)) return this.hf;
+    if (['wan-t2v', 'kling-video', 'luma-dream-machine'].includes(lower)) return this.fal;
+    if (['dall-e-3', 'dall-e-2'].includes(lower)) return this.openai;
+    if (['imagen-3', 'imagen-2'].includes(lower)) return this.gemini;
+
     // Default fallback
     return this.hf;
   }

@@ -16,6 +16,8 @@ export async function POST(req: Request) {
       enhancePrompt: body.enhancePrompt || false,
       provider: body.provider,
       projectId: body.projectId || undefined,
+      referenceImage: body.referenceImage || body.image,
+      referenceImages: body.referenceImages,
     }, req) as any;
     
     // Normalize response for existing frontend

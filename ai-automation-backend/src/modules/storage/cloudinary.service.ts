@@ -59,11 +59,38 @@ export class CloudinaryService {
     }
   }
 
+  async uploadImageUrl(imageUrl: string, folder = 'ai-automation/images'): Promise<UploadResult> {
+    if (!this.configured) {
+      return { url: imageUrl, secureUrl: imageUrl, publicId: `local/${Date.now()}` };
+    }
+    try {
+      const result: UploadApiResponse = await cloudinary.uploader.upload(imageUrl, {
+        folder,
+        resource_type: 'image',
+        transformation: [{ quality: 'auto', fetch_format: 'auto' }],
+      });
+      return {
+        url: result.secure_url || result.url,
+        secureUrl: result.secure_url,
+        publicId: result.public_id,
+        width: result.width,
+        height: result.height,
+        format: result.format,
+        bytes: result.bytes,
+        resourceType: 'image',
+      };
+    } catch (error: any) {
+      this.logger.error(`Cloudinary image URL upload failed: ${error.message}`);
+      return { url: imageUrl, secureUrl: imageUrl, publicId: `error/${Date.now()}` };
+    }
+  }
+
   async uploadVideoUrl(videoUrl: string, folder = 'ai-automation/videos'): Promise<UploadResult> {
     if (!this.configured) return { url: videoUrl, secureUrl: videoUrl, publicId: `local/${Date.now()}` };
     try {
       const result: UploadApiResponse = await cloudinary.uploader.upload(videoUrl, {
-        folder, resource_type: 'video',
+        folder,
+        resource_type: 'video',
       });
       return {
         url: result.secure_url || result.url,
@@ -95,7 +122,6 @@ export class CloudinaryService {
         : 'ai-automation/uploads/images');
 
     if (!this.configured) {
-      // Passthrough mode: create safe data URI for development without Cloudinary API credentials
       const mime = resourceType === 'video' ? 'video/mp4' : 'image/png';
       const base64 = buffer.toString('base64');
       const dataUri = `data:${mime};base64,${base64}`;

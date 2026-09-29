@@ -19,6 +19,8 @@ build/
 out/
 coverage/
 .turbo/
+public/generated/
+ai-automation-app/public/generated/
 
 # Binaries & executables
 *.exe

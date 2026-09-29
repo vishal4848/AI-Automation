@@ -69,6 +69,18 @@ export default function ContentLibraryPage() {
     staleTime: 5000,
   });
 
+  // Fetch real AI generated videos
+  const { data: videosData, isLoading: isLoadingVideos, isError: isErrorVideos, refetch: refetchVideos } = useQuery({
+    queryKey: ['content-library-videos'],
+    queryFn: async () => {
+      const res = await fetch('/api/videos?limit=100');
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json.videos || json.data?.videos || [];
+    },
+    staleTime: 5000,
+  });
+
   // Fetch real uploaded assets from device
   const { data: assetsData, isLoading: isLoadingAssets, isError: isErrorAssets, refetch: refetchAssets } = useQuery({
     queryKey: ['content-library-assets'],
@@ -82,15 +94,27 @@ export default function ContentLibraryPage() {
   });
 
   const rawImages: any[] = Array.isArray(imagesData) ? imagesData : [];
+  const rawVideos: any[] = Array.isArray(videosData) ? videosData : [];
   const rawAssets: any[] = Array.isArray(assetsData) ? assetsData : [];
 
-  // Combine both sources seamlessly
+  // Combine all sources seamlessly
   const allContent = useMemo(() => {
     const formattedImages = rawImages.map((img) => ({
       ...img,
       source: 'AI_GENERATED',
       resourceType: 'image',
       displayName: img.prompt || 'AI Generated Image',
+      provider: img.provider || 'AI Provider',
+      model: img.model || 'FLUX Schnell',
+    }));
+
+    const formattedVideos = rawVideos.map((vid) => ({
+      ...vid,
+      source: 'AI_GENERATED',
+      resourceType: 'video',
+      displayName: vid.prompt || 'AI Generated Video',
+      provider: vid.provider || 'Replicate',
+      model: vid.model || 'WAN 3',
     }));
 
     const formattedAssets = rawAssets.map((asset) => ({
@@ -99,12 +123,13 @@ export default function ContentLibraryPage() {
       resourceType: asset.resourceType || (/\.(mp4|mov|webm)$/i.test(asset.fileName || '') ? 'video' : 'image'),
       displayName: asset.fileName || asset.originalName || 'Uploaded Media',
       prompt: asset.fileName || asset.originalName || 'Uploaded Media',
+      provider: 'Upload',
       model: asset.resourceType === 'video' ? 'Video Upload' : 'Image Upload',
     }));
 
-    const merged = [...formattedImages, ...formattedAssets];
+    const merged = [...formattedImages, ...formattedVideos, ...formattedAssets];
     return merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [rawImages, rawAssets]);
+  }, [rawImages, rawVideos, rawAssets]);
 
   // Filter & Search Logic
   const filteredContent = useMemo(() => {
@@ -252,6 +277,20 @@ export default function ContentLibraryPage() {
           return old.filter((asset) => asset.id !== id);
         });
         queryClient.invalidateQueries({ queryKey: ['content-library-assets'] });
+      } else if (itemToDelete.resourceType === 'video') {
+        if (id && !id.startsWith('temp-') && !id.startsWith('vid-')) {
+          const res = await fetch(`/api/videos/${id}`, { method: 'DELETE' });
+          const resData = await res.json().catch(() => ({}));
+          if (!res.ok && !resData.deleted && !resData.success) {
+            throw new Error(resData.error || resData.message || 'Failed to delete video from server.');
+          }
+        }
+
+        queryClient.setQueryData(['content-library-videos'], (old: any[]) => {
+          if (!Array.isArray(old)) return [];
+          return old.filter((vid) => vid.id !== id);
+        });
+        queryClient.invalidateQueries({ queryKey: ['content-library-videos'] });
       } else {
         if (id && !id.startsWith('img-')) {
           const res = await fetch(`/api/images/${id}`, { method: 'DELETE' });
@@ -288,8 +327,8 @@ export default function ContentLibraryPage() {
     }
   };
 
-  const isLoading = isLoadingImages || isLoadingAssets;
-  const isError = isErrorImages && isErrorAssets;
+  const isLoading = isLoadingImages || isLoadingVideos || isLoadingAssets;
+  const isError = isErrorImages && isErrorVideos && isErrorAssets;
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-8 h-full flex flex-col min-h-[calc(100vh-8rem)]">
@@ -597,7 +636,7 @@ export default function ContentLibraryPage() {
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <span className="text-[10px] text-muted-foreground font-mono truncate">
-                        {item.resourceType === 'video' ? 'Video' : 'Image'} • {formatDate(item.createdAt)}
+                        {item.resourceType === 'video' ? 'Video' : 'Image'}{item.provider ? ` • ${item.provider}` : ''}{item.model ? ` • ${item.model}` : ''} • {formatDate(item.createdAt)}
                       </span>
                       {item.source === 'AI_GENERATED' && (
                         <button
@@ -723,18 +762,24 @@ export default function ContentLibraryPage() {
                       <span>Type:</span>
                       <span className="font-semibold text-foreground capitalize">{previewItem.resourceType}</span>
                     </div>
+                    {previewItem.provider && (
+                      <div className="flex justify-between">
+                        <span>Provider:</span>
+                        <span className="font-semibold text-foreground capitalize">{previewItem.provider}</span>
+                      </div>
+                    )}
+                    {previewItem.model && (
+                      <div className="flex justify-between">
+                        <span>Model:</span>
+                        <span className="font-semibold text-foreground">{previewItem.model}</span>
+                      </div>
+                    )}
                     {previewItem.fileSize && (
                       <div className="flex justify-between">
                         <span>Size:</span>
                         <span className="font-semibold text-foreground">
                           {(previewItem.fileSize / (1024 * 1024)).toFixed(2)} MB
                         </span>
-                      </div>
-                    )}
-                    {previewItem.model && (
-                      <div className="flex justify-between">
-                        <span>Engine/Source:</span>
-                        <span className="font-semibold text-foreground">{previewItem.model}</span>
                       </div>
                     )}
                   </div>

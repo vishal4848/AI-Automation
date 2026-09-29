@@ -27,6 +27,15 @@ describe('SchedulerService', () => {
       update: jest.fn(),
       findMany: jest.fn(),
     },
+    uploadedAsset: {
+      findFirst: jest.fn(),
+    },
+    generatedImage: {
+      findFirst: jest.fn(),
+    },
+    generatedVideo: {
+      findFirst: jest.fn(),
+    },
   };
 
   const mockInstagramPublisher = { publish: jest.fn().mockResolvedValue('ig-post-123') };
@@ -197,6 +206,131 @@ describe('SchedulerService', () => {
 
       expect(result.createdPosts).toHaveLength(3);
       expect(mockQueue.add).toHaveBeenCalledTimes(3);
+    });
+
+    it('should reject post if mediaAssetId does not belong to authenticated user (IDOR security)', async () => {
+      mockPrisma.socialAccount.findFirst.mockResolvedValue({
+        id: 'acc-1',
+        userId: 'user-1',
+        status: 'CONNECTED',
+      });
+      mockPrisma.uploadedAsset.findFirst.mockResolvedValue(null);
+      mockPrisma.generatedImage.findFirst.mockResolvedValue(null);
+      mockPrisma.generatedVideo.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.createScheduledPost('user-1', {
+          socialAccountId: 'acc-1',
+          mediaAssetId: 'asset-belonging-to-other-user',
+          mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+        })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should accept valid owned mediaAssetId and associate uploadedAssetId', async () => {
+      mockPrisma.socialAccount.findFirst.mockResolvedValue({
+        id: 'acc-1',
+        userId: 'user-1',
+        platform: 'Instagram',
+        status: 'CONNECTED',
+      });
+      mockPrisma.uploadedAsset.findFirst.mockResolvedValue({
+        id: 'asset-123',
+        userId: 'user-1',
+        secureUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+      });
+      mockPrisma.scheduledPost.create.mockImplementation(({ data }: any) => {
+        return Promise.resolve({
+          id: 'post-123',
+          ...data,
+        });
+      });
+
+      const futureDate = new Date(Date.now() + 1000 * 60 * 60).toISOString();
+      const result = await service.createScheduledPost('user-1', {
+        socialAccountId: 'acc-1',
+        mediaAssetId: 'asset-123',
+        mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+        scheduledAtUTC: futureDate,
+      });
+
+      expect(result.uploadedAssetId).toBe('asset-123');
+      expect(mockPrisma.scheduledPost.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            uploadedAssetId: 'asset-123',
+          }),
+        })
+      );
+    });
+
+    it('should reject incompatible media formats for Instagram (e.g. webm)', async () => {
+      mockPrisma.socialAccount.findFirst.mockResolvedValue({
+        id: 'acc-ig',
+        userId: 'user-1',
+        platform: 'Instagram',
+        status: 'CONNECTED',
+      });
+
+      await expect(
+        service.createScheduledPost('user-1', {
+          socialAccountId: 'acc-ig',
+          mediaUrl: 'https://res.cloudinary.com/demo/video/upload/sample.webm',
+        })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should isolate failures when publishing immediately to multiple accounts (Post Now)', async () => {
+      mockPrisma.socialAccount.findFirst.mockImplementation(({ where }: any) => {
+        if (where.id === 'acc-ig-1') return Promise.resolve({ id: 'acc-ig-1', userId: 'user-1', platform: 'Instagram', status: 'CONNECTED' });
+        if (where.id === 'acc-ig-2') return Promise.resolve({ id: 'acc-ig-2', userId: 'user-1', platform: 'Instagram', status: 'CONNECTED' });
+        return Promise.resolve(null);
+      });
+
+      mockPrisma.scheduledPost.create.mockImplementation(({ data }: any) => {
+        return Promise.resolve({
+          id: `post-${data.socialAccountId}`,
+          userId: data.userId,
+          socialAccountId: data.socialAccountId,
+          platform: data.platform,
+          mediaUrl: data.mediaUrl,
+          status: 'PROCESSING',
+          socialAccount: { id: data.socialAccountId, platform: data.platform },
+        });
+      });
+
+      mockPrisma.scheduledPost.findUnique.mockImplementation(({ where }: any) => {
+        return Promise.resolve({
+          id: where.id,
+          userId: 'user-1',
+          platform: 'Instagram',
+          socialAccountId: where.id.replace('post-', ''),
+          socialAccount: { id: where.id.replace('post-', ''), platform: 'Instagram' },
+        });
+      });
+
+      // Acc 1 succeeds, Acc 2 throws
+      mockInstagramPublisher.publish.mockImplementation((acc: any) => {
+        if (acc.id === 'acc-ig-1') return Promise.resolve('ig-post-success');
+        throw new Error('INSTAGRAM_TOKEN_EXPIRED: Token expired');
+      });
+
+      mockPrisma.scheduledPost.update.mockImplementation(({ where, data }: any) => {
+        return Promise.resolve({
+          id: where.id,
+          ...data,
+        });
+      });
+
+      const result = await service.createScheduledPost('user-1', {
+        socialAccountIds: ['acc-ig-1', 'acc-ig-2'],
+        mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+      });
+
+      expect(result.createdPosts).toHaveLength(2);
+      expect(result.createdPosts[0].status).toBe('PUBLISHED');
+      expect(result.createdPosts[1].status).toBe('FAILED');
+      expect(result.createdPosts[1].errorMessage).toContain('INSTAGRAM_TOKEN_EXPIRED');
     });
   });
 

@@ -4,6 +4,7 @@ import { AIGatewayService } from '../ai-gateway/ai-gateway.service';
 import { CloudinaryService } from '../storage/cloudinary.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ModelRegistryService } from '../models/model-registry.service';
 import { GenerateImageDto } from './dto/generate-image.dto';
 
 @Injectable()
@@ -16,40 +17,86 @@ export class ImagesService {
     private cloudinary: CloudinaryService,
     private analyticsService: AnalyticsService,
     private notificationsService: NotificationsService,
+    private modelRegistry: ModelRegistryService,
   ) {}
 
   async generate(userId: string, dto: GenerateImageDto) {
+    // Model-aware parameter validation
+    const modelId = dto.model || 'flux-schnell';
+    const validation = this.modelRegistry.validateModelParams(modelId, {
+      prompt: dto.prompt,
+      negativePrompt: dto.negativePrompt,
+      ratio: dto.ratio,
+    });
+    if (!validation.valid) {
+      throw new BadRequestException(validation.error);
+    }
+
+    // Check user credits
+    const modelEntry = this.modelRegistry.getModel(modelId, dto.provider);
+    const requiredCredits = modelEntry ? modelEntry.creditsPerGeneration : 5;
+
+    let userCredits = 100;
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { credits: true },
+      });
+      if (user) {
+        userCredits = user.credits;
+        if (user.credits < requiredCredits) {
+          throw new BadRequestException(
+            `Insufficient credits. Required: ${requiredCredits}, available: ${user.credits}`,
+          );
+        }
+      }
+    } catch (err: any) {
+      if (err instanceof BadRequestException) throw err;
+    }
+
     const start = Date.now();
     let enhancedPrompt = dto.prompt;
 
     // Enhance prompt if requested
     if (dto.enhancePrompt) {
       enhancedPrompt = await this.aiGateway.enhancePrompt({
-        prompt: dto.prompt, category: 'image', style: dto.style,
+        prompt: dto.prompt,
+        category: 'image',
+        style: dto.style,
       });
       this.logger.log(`Prompt enhanced: "${dto.prompt}" → "${enhancedPrompt}"`);
     }
 
-    // Generate image
-    const result = await this.aiGateway.generateImage({
-      prompt: enhancedPrompt,
-      negativePrompt: dto.negativePrompt,
-      model: dto.model || 'flux-schnell',
-      style: dto.style,
-      ratio: dto.ratio,
-      steps: dto.steps,
-    }, { preferredProvider: dto.provider });
+    // Generate image via AI Gateway
+    const refImage = dto.referenceImage || (dto.referenceImages ? dto.referenceImages[0] : undefined);
+    const result = await this.aiGateway.generateImage(
+      {
+        prompt: enhancedPrompt,
+        negativePrompt: dto.negativePrompt,
+        model: modelId,
+        style: dto.style,
+        ratio: dto.ratio,
+        steps: dto.steps,
+        referenceImage: refImage,
+        referenceImages: dto.referenceImages,
+      } as any,
+      { preferredProvider: dto.provider },
+    );
 
     if (!result.success || !result.data) {
       throw new BadRequestException(result.error || 'Image generation failed');
     }
 
-    // Upload to Cloudinary
+    // Upload to Cloudinary (support data URLs, base64, and remote HTTP URLs from Replicate)
     let finalUrl = result.data.url;
     let cloudinaryId: string | undefined;
     if (result.data.base64 || result.data.url.startsWith('data:')) {
       const upload = await this.cloudinary.uploadBase64Image(result.data.url);
-      finalUrl = upload.url;
+      finalUrl = upload.secureUrl || upload.url;
+      cloudinaryId = upload.publicId;
+    } else if (result.data.url && result.data.url.startsWith('http')) {
+      const upload = await this.cloudinary.uploadImageUrl(result.data.url);
+      finalUrl = upload.secureUrl || upload.url;
       cloudinaryId = upload.publicId;
     }
 
@@ -61,15 +108,20 @@ export class ImagesService {
           userId,
           projectId: dto.projectId || null,
           provider: result.provider,
-          model: dto.model || 'flux-schnell',
+          model: modelId,
           prompt: dto.prompt,
           negPrompt: dto.negativePrompt,
           style: dto.style,
           ratio: dto.ratio,
           url: finalUrl,
           cloudinaryId,
-          creditsUsed: 5,
-          metadata: { enhancedPrompt, demo: result.demo, latencyMs: result.latencyMs },
+          creditsUsed: requiredCredits,
+          metadata: {
+            enhancedPrompt,
+            demo: result.demo,
+            latencyMs: result.latencyMs,
+            resourceType: 'image',
+          },
         },
       });
 
@@ -80,16 +132,32 @@ export class ImagesService {
           originalPrompt: dto.prompt,
           enhancedPrompt: dto.enhancePrompt ? enhancedPrompt : undefined,
           provider: result.provider,
-          model: dto.model,
+          model: modelId,
           category: 'IMAGE',
-          creditsUsed: 5,
+          creditsUsed: requiredCredits,
           generationMs: Date.now() - start,
           status: 'COMPLETED',
         },
       });
 
       // Deduct credits
-      await this.prisma.user.update({ where: { id: userId }, data: { credits: { decrement: 5 } } });
+      if (requiredCredits > 0) {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { credits: { decrement: requiredCredits } },
+        });
+
+        await this.prisma.creditTransaction.create({
+          data: {
+            userId,
+            amount: -requiredCredits,
+            type: 'USAGE',
+            description: `Generated image with ${modelId}`,
+            balanceAfter: userCredits - requiredCredits,
+            metadata: { model: modelId, provider: result.provider },
+          },
+        }).catch(() => {});
+      }
 
       // Create live notification
       await this.notificationsService.create(userId, {
@@ -105,16 +173,18 @@ export class ImagesService {
     const imageResult = {
       id: savedImage?.id || `img-${Date.now()}`,
       url: finalUrl,
+      secureUrl: finalUrl,
+      cloudinaryId,
       prompt: dto.prompt,
       enhancedPrompt: dto.enhancePrompt ? enhancedPrompt : undefined,
-      model: dto.model || 'FLUX Schnell',
+      model: modelId,
       provider: result.provider,
       style: dto.style,
       ratio: dto.ratio,
       projectId: dto.projectId || undefined,
       demo: result.demo,
       latencyMs: result.latencyMs,
-      createdAt: new Date(),
+      createdAt: savedImage?.createdAt || new Date(),
     };
 
     return imageResult;
@@ -160,6 +230,24 @@ export class ImagesService {
 
     if (image.userId !== userId) {
       throw new NotFoundException('Image not found or access denied');
+    }
+
+    // Check if image is in use by an active scheduled post
+    const inUse = await this.prisma.scheduledPost?.findFirst({
+      where: {
+        userId,
+        status: { in: ['SCHEDULED', 'PROCESSING'] },
+        OR: [
+          { mediaUrl: image.url },
+          ...(image.cloudinaryId ? [{ mediaUrl: { contains: image.cloudinaryId } }] : []),
+        ],
+      },
+    });
+
+    if (inUse) {
+      throw new BadRequestException(
+        'ASSET_IN_USE_BY_SCHEDULED_POST: This image is currently being used by an active scheduled post and cannot be deleted.',
+      );
     }
 
     if (image.cloudinaryId) {

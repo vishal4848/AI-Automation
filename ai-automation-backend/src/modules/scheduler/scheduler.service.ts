@@ -100,29 +100,83 @@ export class SchedulerService {
       socialAccountId?: string;
       socialAccountIds?: string[];
       mediaUrl: string;
+      mediaAssetId?: string;
+      uploadedAssetId?: string;
       caption?: string;
       scheduledAtUTC?: string;
     },
   ) {
-    // 1. Resolve target social account IDs
-    const targetAccountIds: string[] = [];
+    // 1. Resolve target social account IDs (deduplicating and filtering empty)
+    const rawAccountIds: string[] = [];
     if (Array.isArray(dto.socialAccountIds) && dto.socialAccountIds.length > 0) {
-      targetAccountIds.push(...dto.socialAccountIds);
+      rawAccountIds.push(...dto.socialAccountIds);
     } else if (dto.socialAccountId) {
-      targetAccountIds.push(dto.socialAccountId);
+      rawAccountIds.push(dto.socialAccountId);
     }
+
+    const targetAccountIds = Array.from(new Set(rawAccountIds.filter(Boolean)));
 
     if (targetAccountIds.length === 0) {
       throw new BadRequestException('SOCIAL_ACCOUNT_REQUIRED: Select at least one connected Instagram or Facebook Page account.');
     }
 
-    // 2. Validate Media URL
-    if (!dto.mediaUrl || typeof dto.mediaUrl !== 'string') {
+    // 2. Validate Media Asset Ownership and URLs
+    const assetId = dto.mediaAssetId || dto.uploadedAssetId;
+    let verifiedUploadedAssetId: string | null = null;
+    let finalMediaUrl = dto.mediaUrl;
+
+    if (assetId) {
+      let foundMedia: any = null;
+
+      // Check UploadedAsset if table exists in Prisma
+      if (this.prisma.uploadedAsset) {
+        const uploaded = await this.prisma.uploadedAsset.findFirst({
+          where: { id: assetId, userId },
+        });
+        if (uploaded) {
+          foundMedia = uploaded;
+          verifiedUploadedAssetId = uploaded.id;
+          finalMediaUrl = uploaded.secureUrl || uploaded.url || finalMediaUrl;
+        }
+      }
+
+      // Check GeneratedImage if not found yet
+      if (!foundMedia && this.prisma.generatedImage) {
+        const genImg = await this.prisma.generatedImage.findFirst({
+          where: { id: assetId, userId },
+        });
+        if (genImg) {
+          foundMedia = genImg;
+          finalMediaUrl = genImg.url || finalMediaUrl;
+        }
+      }
+
+      // Check GeneratedVideo if not found yet
+      if (!foundMedia && this.prisma.generatedVideo) {
+        const genVid = await this.prisma.generatedVideo.findFirst({
+          where: { id: assetId, userId },
+        });
+        if (genVid) {
+          foundMedia = genVid;
+          finalMediaUrl = genVid.url || finalMediaUrl;
+        }
+      }
+
+      if (!foundMedia) {
+        throw new BadRequestException('MEDIA_ASSET_NOT_FOUND: Selected media asset was not found or does not belong to your account.');
+      }
+    }
+
+    if (!finalMediaUrl || typeof finalMediaUrl !== 'string') {
       throw new BadRequestException('MEDIA_URL_REQUIRED: Media URL is required.');
     }
 
-    if (dto.mediaUrl.includes('localhost') || dto.mediaUrl.includes('127.0.0.1')) {
+    if (finalMediaUrl.includes('localhost') || finalMediaUrl.includes('127.0.0.1')) {
       throw new BadRequestException('MEDIA_URL_INVALID: Localhost URLs cannot be accessed by Meta. Please select media hosted on Cloudinary.');
+    }
+
+    if (!finalMediaUrl.startsWith('https://') && !finalMediaUrl.startsWith('http://') && !finalMediaUrl.startsWith('data:')) {
+      throw new BadRequestException('MEDIA_URL_INVALID: Media URL must be a valid public link.');
     }
 
     // 3. Determine Schedule Delay
@@ -141,8 +195,13 @@ export class SchedulerService {
       delay = scheduledTime.getTime() - now.getTime();
     }
 
-    // 4. Validate all accounts and create posts
-    const createdPosts: any[] = [];
+    // 4. Validate all accounts and platform compatibility upfront
+    const validatedAccounts: any[] = [];
+    const isVideo =
+      finalMediaUrl.endsWith('.mp4') ||
+      finalMediaUrl.endsWith('.mov') ||
+      finalMediaUrl.endsWith('.webm') ||
+      finalMediaUrl.includes('/video/upload/');
 
     for (const accId of targetAccountIds) {
       const account = await this.prisma.socialAccount.findFirst({
@@ -159,14 +218,28 @@ export class SchedulerService {
       }
 
       const postPlatform = account.platform || dto.platform || 'Instagram';
+      const platformLower = postPlatform.toLowerCase();
 
+      // Platform-media compatibility check
+      if (platformLower === 'instagram' && isVideo && finalMediaUrl.endsWith('.webm')) {
+        throw new BadRequestException('PLATFORM_MEDIA_INCOMPATIBLE: Instagram only supports MP4 or MOV video formats.');
+      }
+
+      validatedAccounts.push({ account, postPlatform });
+    }
+
+    // 5. Create independent posts and publishing jobs for each account
+    const createdPosts: any[] = [];
+
+    for (const { account, postPlatform } of validatedAccounts) {
       // Save to PostgreSQL
       const post = await this.prisma.scheduledPost.create({
         data: {
           userId,
           socialAccountId: account.id,
           platform: postPlatform,
-          mediaUrl: dto.mediaUrl,
+          mediaUrl: finalMediaUrl,
+          uploadedAssetId: verifiedUploadedAssetId,
           caption: dto.caption || '',
           scheduledAtUTC: scheduledTime,
           status: scheduledTime ? 'SCHEDULED' : 'PROCESSING',

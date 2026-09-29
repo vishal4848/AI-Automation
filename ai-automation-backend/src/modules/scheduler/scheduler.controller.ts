@@ -20,6 +20,8 @@ export class SchedulerController {
       socialAccountId?: string;
       socialAccountIds?: string[];
       mediaUrl: string;
+      mediaAssetId?: string;
+      uploadedAssetId?: string;
       caption?: string;
       scheduledAtUTC?: string;
     },

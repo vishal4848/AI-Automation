@@ -13,45 +13,60 @@ export class SocialService {
   ) {}
 
   /**
-   * Generates the Meta Instagram API authorization URL using Instagram Login for Professional accounts.
-   * Scopes strictly required: instagram_business_basic, instagram_business_content_publish.
-   * State is cryptographically signed with HMAC-SHA256 to guarantee authenticity and prevent CSRF/replay attacks.
+   * Generates the official Instagram Login OAuth authorization URL.
+   * Directs the user to the native Instagram Login page (instagram.com) with the Instagram logo,
+   * username, and password fields.
+   * Scopes: instagram_business_basic, instagram_business_content_publish.
    */
-  getInstagramConnectUrl(userId: string): string {
+  getInstagramConnectUrl(userId: string, flowOverride?: string): string {
     const appId = this.configService.get<string>('INSTAGRAM_APP_ID') || this.configService.get<string>('META_APP_ID') || this.configService.get<string>('FACEBOOK_APP_ID');
     const redirectUri = this.configService.get<string>('META_REDIRECT_URI') || 'http://localhost:3001/api/v1/social/instagram/callback';
-    const version = this.configService.get<string>('META_API_VERSION') || 'v20.0';
     const signingKey = this.configService.get<string>('TOKEN_ENCRYPTION_KEY') || this.configService.get<string>('jwt.secret') || 'dev-token-encryption-key-32-chars-long';
+    const version = this.configService.get<string>('META_API_VERSION') || 'v20.0';
+    const flow = flowOverride || this.configService.get<string>('INSTAGRAM_AUTH_FLOW') || 'instagram';
 
     if (!appId || !redirectUri || appId === 'your-meta-app-id') {
       this.logger.warn('Meta OAuth configuration is missing.');
       throw new BadRequestException('INSTAGRAM_NOT_CONFIGURED: Meta App ID or Redirect URI is missing in server environment.');
     }
 
-    const scopes = [
-      'instagram_basic',
-      'instagram_content_publish',
-      'pages_show_list',
-      'pages_read_engagement',
-      'public_profile',
-    ].join(',');
-
     const state = createSignedOAuthState(userId, signingKey);
     const cleanRedirectUri = redirectUri.trim();
 
-    this.logger.log(`Meta Instagram OAuth URL generated for client_id=${appId} with redirect_uri=${cleanRedirectUri}`);
+    // If explicit Facebook dialog flow requested
+    if (flow === 'facebook') {
+      const fbAppId = this.configService.get<string>('META_APP_ID') || this.configService.get<string>('FACEBOOK_APP_ID') || appId;
+      const fbScopes = [
+        'instagram_basic',
+        'instagram_content_publish',
+        'pages_show_list',
+        'pages_read_engagement',
+        'business_management',
+        'public_profile',
+      ].join(',');
+      this.logger.log(`Meta Facebook OAuth URL for Instagram generated for client_id=${fbAppId} with redirect_uri=${cleanRedirectUri}`);
+      return `https://www.facebook.com/${version}/dialog/oauth?client_id=${encodeURIComponent(fbAppId)}&redirect_uri=${encodeURIComponent(cleanRedirectUri)}&scope=${encodeURIComponent(fbScopes)}&response_type=code&state=${encodeURIComponent(state)}`;
+    }
 
-    return `https://www.facebook.com/${version}/dialog/oauth?client_id=${encodeURIComponent(appId)}&redirect_uri=${encodeURIComponent(cleanRedirectUri)}&scope=${encodeURIComponent(scopes)}&response_type=code&state=${encodeURIComponent(state)}`;
+    // Default: Official Instagram Login page at www.instagram.com/oauth/authorize
+    // Clean URL without enable_fb_login=0 so it does not trigger "Invalid platform app"
+    const scopes = [
+      'instagram_business_basic',
+      'instagram_business_content_publish',
+    ].join(',');
+
+    this.logger.log(`Instagram Login page URL generated for client_id=${appId} with redirect_uri=${cleanRedirectUri}`);
+    return `https://www.instagram.com/oauth/authorize?client_id=${encodeURIComponent(appId)}&redirect_uri=${encodeURIComponent(cleanRedirectUri)}&scope=${encodeURIComponent(scopes)}&response_type=code&state=${encodeURIComponent(state)}`;
   }
 
   /**
-   * Handles the OAuth callback from Meta, validates the signed state token,
+   * Handles the OAuth callback from Meta/Instagram, validates the signed state token,
    * exchanges authorization code for a long-lived access token, discovers the Instagram
    * professional account, encrypts the token, and persists the account to PostgreSQL.
    */
   async handleInstagramCallback(code: string, state: string): Promise<any> {
-    const appId = this.configService.get<string>('INSTAGRAM_APP_ID') || this.configService.get<string>('META_APP_ID');
-    const appSecret = this.configService.get<string>('INSTAGRAM_APP_SECRET') || this.configService.get<string>('META_APP_SECRET');
+    const appId = this.configService.get<string>('INSTAGRAM_APP_ID') || this.configService.get<string>('META_APP_ID') || this.configService.get<string>('FACEBOOK_APP_ID');
+    const appSecret = this.configService.get<string>('INSTAGRAM_APP_SECRET') || this.configService.get<string>('META_APP_SECRET') || this.configService.get<string>('FACEBOOK_APP_SECRET');
     const redirectUri = this.configService.get<string>('META_REDIRECT_URI');
     const version = this.configService.get<string>('META_API_VERSION') || 'v20.0';
     const encryptionKey = this.configService.get<string>('TOKEN_ENCRYPTION_KEY') || 'dev-token-encryption-key-32-chars-long';
@@ -70,40 +85,49 @@ export class SocialService {
       throw new BadRequestException(`INSTAGRAM_AUTH_FAILED: ${stateErr.message}`);
     }
 
+    const fbAppId = this.configService.get<string>('META_APP_ID') || this.configService.get<string>('FACEBOOK_APP_ID') || appId;
+    const fbAppSecret = this.configService.get<string>('META_APP_SECRET') || this.configService.get<string>('FACEBOOK_APP_SECRET') || appSecret;
+
     try {
       // 2. Exchange authorization code for short-lived access token
-      // Form-encoded POST to api.instagram.com / graph.facebook.com
+      // Strip any trailing hash or fragment (e.g. #_ or #_=_ appended by Instagram)
+      const cleanCode = code ? code.replace(/#.*$/, '').trim() : code;
+
+      // Exchange authorization code with api.instagram.com (primary for Instagram Login)
       const tokenFormData = new URLSearchParams();
       tokenFormData.append('client_id', appId);
       tokenFormData.append('client_secret', appSecret);
       tokenFormData.append('grant_type', 'authorization_code');
       tokenFormData.append('redirect_uri', redirectUri);
-      tokenFormData.append('code', code);
+      tokenFormData.append('code', cleanCode);
 
       let tokenResponse = await fetch('https://api.instagram.com/oauth/access_token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: tokenFormData.toString(),
       });
-
       let tokenData = await tokenResponse.json();
 
-      // Fallback to graph.facebook.com oauth if using unified Meta app credentials
+      // Fallback to graph.facebook.com oauth if code was generated via Facebook dialog
       if (!tokenData.access_token) {
-        const fbTokenUrl = `https://graph.facebook.com/${version}/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${encodeURIComponent(code)}`;
-        tokenResponse = await fetch(fbTokenUrl);
-        tokenData = await tokenResponse.json();
+        const fbTokenUrl = `https://graph.facebook.com/${version}/oauth/access_token?client_id=${fbAppId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${fbAppSecret}&code=${encodeURIComponent(cleanCode)}`;
+        const fbRes = await fetch(fbTokenUrl);
+        const fbData = await fbRes.json();
+        if (fbData.access_token) {
+          tokenData = fbData;
+        }
       }
 
       if (tokenData.error) {
-        this.logger.error(`Meta token exchange error: ${typeof tokenData.error === 'string' ? tokenData.error : JSON.stringify(tokenData.error)}`);
+        this.logger.error(`Meta/Instagram token exchange error: ${typeof tokenData.error === 'string' ? tokenData.error : JSON.stringify(tokenData.error)}`);
         const errorMsg = typeof tokenData.error === 'string' ? tokenData.error : tokenData.error.message || 'Failed to exchange authorization code for access token';
         throw new Error(errorMsg);
       }
 
       const shortLivedToken = tokenData.access_token;
+      const userIdFromToken = tokenData.user_id ? String(tokenData.user_id) : null;
       if (!shortLivedToken) {
-        throw new Error('No access token returned from Meta OAuth.');
+        throw new Error('No access token returned from Meta/Instagram OAuth.');
       }
 
       // 3. Exchange short-lived token for 60-day long-lived access token
@@ -111,25 +135,25 @@ export class SocialService {
       let tokenExpiresAt: Date | null = null;
 
       try {
-        // Try graph.instagram.com ig_exchange_token first
-        const igExchangeUrl = `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${appSecret}&access_token=${shortLivedToken}`;
-        const igExchangeRes = await fetch(igExchangeUrl);
-        const igExchangeData = await igExchangeRes.json();
-
-        if (igExchangeData.access_token) {
-          longLivedToken = igExchangeData.access_token;
-          if (igExchangeData.expires_in) {
-            tokenExpiresAt = new Date(Date.now() + igExchangeData.expires_in * 1000);
+        // Try fb_exchange_token first (standard for Meta Apps)
+        const fbExchangeUrl = `https://graph.facebook.com/${version}/oauth/access_token?grant_type=fb_exchange_token&client_id=${fbAppId}&client_secret=${fbAppSecret}&fb_exchange_token=${shortLivedToken}`;
+        const fbExchangeRes = await fetch(fbExchangeUrl);
+        const fbExchangeData = await fbExchangeRes.json();
+        if (fbExchangeData.access_token) {
+          longLivedToken = fbExchangeData.access_token;
+          if (fbExchangeData.expires_in) {
+            tokenExpiresAt = new Date(Date.now() + fbExchangeData.expires_in * 1000);
           }
         } else {
-          // Fallback to fb_exchange_token
-          const fbExchangeUrl = `https://graph.facebook.com/${version}/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortLivedToken}`;
-          const fbExchangeRes = await fetch(fbExchangeUrl);
-          const fbExchangeData = await fbExchangeRes.json();
-          if (fbExchangeData.access_token) {
-            longLivedToken = fbExchangeData.access_token;
-            if (fbExchangeData.expires_in) {
-              tokenExpiresAt = new Date(Date.now() + fbExchangeData.expires_in * 1000);
+          // Fallback to graph.instagram.com ig_exchange_token
+          const igExchangeUrl = `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${appSecret}&access_token=${shortLivedToken}`;
+          const igExchangeRes = await fetch(igExchangeUrl);
+          const igExchangeData = await igExchangeRes.json();
+
+          if (igExchangeData.access_token) {
+            longLivedToken = igExchangeData.access_token;
+            if (igExchangeData.expires_in) {
+              tokenExpiresAt = new Date(Date.now() + igExchangeData.expires_in * 1000);
             }
           }
         }
@@ -140,39 +164,81 @@ export class SocialService {
       // 4. Retrieve Instagram Professional Account information
       let igAccountId: string | null = null;
       let igUsername: string | null = null;
+      let pageId: string | null = null;
+      let finalToken = longLivedToken;
 
-      // Query graph.instagram.com me endpoint (Direct Instagram Login flow)
+      // 4a. Query graph.facebook.com me/accounts (primary for Meta App OAuth flow: discovers Instagram Business accounts linked to FB pages)
       try {
-        const meUrl = `https://graph.instagram.com/${version}/me?fields=id,username,account_type,name&access_token=${longLivedToken}`;
-        const meResponse = await fetch(meUrl);
-        const meData = await meResponse.json();
+        const pagesUrl = `https://graph.facebook.com/${version}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username}&access_token=${encodeURIComponent(longLivedToken)}`;
+        const pagesRes = await fetch(pagesUrl);
+        const pagesData = await pagesRes.json();
 
-        if (meData.id && meData.username) {
-          igAccountId = meData.id;
-          igUsername = meData.username;
+        if (Array.isArray(pagesData.data)) {
+          for (const page of pagesData.data) {
+            if (page.instagram_business_account?.id) {
+              igAccountId = page.instagram_business_account.id;
+              igUsername = page.instagram_business_account.username || `${page.name} (Instagram)`;
+              pageId = page.id;
+              finalToken = page.access_token || longLivedToken;
+              this.logger.log(`Found linked Instagram business account via page ${page.name}: ${igAccountId} (@${igUsername})`);
+              break;
+            }
+          }
         }
-      } catch {}
+      } catch (err: any) {
+        this.logger.warn(`Failed to inspect me/accounts for Instagram account: ${err.message}`);
+      }
 
-      // Fallback: Query graph.facebook.com me endpoint if necessary
+      // 4b. Query graph.instagram.com me endpoint (primary for Direct Instagram Login flow)
       if (!igAccountId || !igUsername) {
         try {
-          const fbMeUrl = `https://graph.facebook.com/${version}/me?fields=id,username,account_type&access_token=${longLivedToken}`;
+          const meUrl = `https://graph.instagram.com/v20.0/me?fields=id,user_id,username,account_type,name&access_token=${longLivedToken}`;
+          const meResponse = await fetch(meUrl);
+          const meData = await meResponse.json();
+
+          if (meData.id || meData.user_id) {
+            igAccountId = String(meData.id || meData.user_id || userIdFromToken);
+            igUsername = meData.username || meData.name;
+          }
+        } catch (err: any) {
+          this.logger.warn(`Failed to inspect graph.instagram.com me: ${err.message}`);
+        }
+      }
+
+      // 4c. Fallback: Query graph.facebook.com me endpoint if necessary
+      if (!igAccountId || !igUsername) {
+        try {
+          const fbMeUrl = `https://graph.facebook.com/${version}/me?fields=id,username,name&access_token=${longLivedToken}`;
           const fbMeResponse = await fetch(fbMeUrl);
           const fbMeData = await fbMeResponse.json();
 
           if (fbMeData.id) {
             igAccountId = fbMeData.id;
-            igUsername = fbMeData.username || 'instagram_creator';
+            igUsername = fbMeData.username || fbMeData.name || 'instagram_creator';
+          }
+        } catch {}
+      }
+
+      // 4c. Fallback: Query graph.facebook.com me endpoint if necessary
+      if (!igAccountId || !igUsername) {
+        try {
+          const fbMeUrl = `https://graph.facebook.com/${version}/me?fields=id,username,name&access_token=${longLivedToken}`;
+          const fbMeResponse = await fetch(fbMeUrl);
+          const fbMeData = await fbMeResponse.json();
+
+          if (fbMeData.id) {
+            igAccountId = fbMeData.id;
+            igUsername = fbMeData.username || fbMeData.name || 'instagram_creator';
           }
         } catch {}
       }
 
       if (!igAccountId || !igUsername) {
-        throw new BadRequestException('INSTAGRAM_ACCOUNT_NOT_ELIGIBLE: No eligible Instagram Professional (Business or Creator) account found.');
+        throw new BadRequestException('INSTAGRAM_ACCOUNT_NOT_ELIGIBLE: No eligible Instagram Professional (Business or Creator) account found linked to your account.');
       }
 
       // 5. Encrypt access token before storing in PostgreSQL
-      const encryptedToken = encrypt(longLivedToken, encryptionKey);
+      const encryptedToken = encrypt(finalToken, encryptionKey);
 
       // 6. Upsert SocialAccount in PostgreSQL scoped to the authenticated userId
       const account = await this.prisma.socialAccount.upsert({
@@ -184,6 +250,7 @@ export class SocialService {
         },
         update: {
           userId,
+          pageId,
           username: igUsername,
           accessTokenEncrypted: encryptedToken,
           tokenExpiresAt,
@@ -193,6 +260,7 @@ export class SocialService {
           userId,
           platform: 'Instagram',
           platformUserId: igAccountId,
+          pageId,
           username: igUsername,
           accessTokenEncrypted: encryptedToken,
           tokenExpiresAt,
@@ -202,6 +270,7 @@ export class SocialService {
           id: true,
           platform: true,
           username: true,
+          pageId: true,
           status: true,
           tokenExpiresAt: true,
           createdAt: true,

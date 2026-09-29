@@ -36,6 +36,15 @@ export class GenerateImageDto {
   @IsString() @IsOptional()
   projectId?: string;
 
+  @ApiProperty({ example: 'https://example.com/ref.png', required: false })
+  @IsString()
+  @IsOptional()
+  referenceImage?: string;
+
+  @ApiProperty({ example: ['https://example.com/ref.png'], required: false })
+  @IsOptional()
+  referenceImages?: string[];
+
   @IsNumber() @IsOptional() @Min(1) @Max(4)
   numImages?: number = 1;
 }

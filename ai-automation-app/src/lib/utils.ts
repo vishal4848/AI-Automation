@@ -47,3 +47,53 @@ export function getGreeting(): string {
   if (hour < 18) return 'Good afternoon';
   return 'Good evening';
 }
+
+export async function downloadMedia(url: string, defaultFilename: string): Promise<boolean> {
+  if (!url) return false;
+
+  // 1. Direct blob / data URL download
+  if (url.startsWith('data:') || url.startsWith('blob:')) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = defaultFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return true;
+  }
+
+  // 2. Fetch as blob with CORS
+  try {
+    const response = await fetch(url, { mode: 'cors' });
+    if (response.ok) {
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = defaultFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      return true;
+    }
+  } catch {
+    // CORS or network failure — proceed to proxy
+  }
+
+  // 3. Fallback to server-side download proxy with Content-Disposition: attachment header
+  try {
+    const proxyUrl = `/api/media/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(defaultFilename)}`;
+    const a = document.createElement('a');
+    a.href = proxyUrl;
+    a.download = defaultFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return true;
+  } catch (err) {
+    console.error('Download proxy failed:', err);
+    return false;
+  }
+}
+

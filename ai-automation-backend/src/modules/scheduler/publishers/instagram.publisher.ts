@@ -59,17 +59,27 @@ export class InstagramPublisher implements SocialPublisher {
 
     let workingHost = hostEndpoints[0];
 
+    const isVideo = this.isVideoUrl(post.mediaUrl);
+
     for (const host of hostEndpoints) {
       try {
         const containerUrl = `${host}/${igAccountId}/media`;
+        const payload: Record<string, any> = {
+          caption: post.caption || '',
+          access_token: accessToken,
+        };
+
+        if (isVideo) {
+          payload.media_type = 'REELS';
+          payload.video_url = post.mediaUrl;
+        } else {
+          payload.image_url = post.mediaUrl;
+        }
+
         const containerResponse = await fetch(containerUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image_url: post.mediaUrl,
-            caption: post.caption || '',
-            access_token: accessToken,
-          }),
+          body: JSON.stringify(payload),
         });
 
         const containerData = await containerResponse.json();
@@ -176,6 +186,20 @@ export class InstagramPublisher implements SocialPublisher {
       this.logger.error(`Failed to publish Instagram media: ${sanitized}`);
       throw new Error(sanitized);
     }
+  }
+
+  private isVideoUrl(url: string): boolean {
+    if (!url) return false;
+    const lower = url.toLowerCase();
+    return (
+      lower.endsWith('.mp4') ||
+      lower.endsWith('.mov') ||
+      lower.endsWith('.webm') ||
+      lower.includes('/video/upload/') ||
+      lower.includes('.mp4?') ||
+      lower.includes('.mov?') ||
+      lower.includes('.webm?')
+    );
   }
 
   private sanitize(message: string): string {

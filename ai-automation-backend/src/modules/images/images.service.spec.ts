@@ -5,6 +5,7 @@ import { AIGatewayService } from '../ai-gateway/ai-gateway.service';
 import { CloudinaryService } from '../storage/cloudinary.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ModelRegistryService } from '../models/model-registry.service';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 describe('ImagesService - Delete Feature & Security', () => {
@@ -30,6 +31,9 @@ describe('ImagesService - Delete Feature & Security', () => {
     },
     user: {
       update: jest.fn(),
+    },
+    scheduledPost: {
+      findFirst: jest.fn().mockResolvedValue(null),
     },
   };
 
@@ -61,6 +65,10 @@ describe('ImagesService - Delete Feature & Security', () => {
         { provide: CloudinaryService, useValue: mockCloudinary },
         { provide: AnalyticsService, useValue: mockAnalytics },
         { provide: NotificationsService, useValue: mockNotificationsService },
+        {
+          provide: ModelRegistryService,
+          useValue: { validateModelParams: jest.fn().mockReturnValue({ valid: true }) },
+        },
       ],
     }).compile();
 
@@ -173,6 +181,22 @@ describe('ImagesService - Delete Feature & Security', () => {
       // Second deletion: no longer exists
       mockPrisma.generatedImage.findFirst.mockResolvedValueOnce(null);
       await expect(service.deleteImage('user-alice', 'img-dup')).rejects.toThrow(NotFoundException);
+    });
+
+    it('9. Rejects deletion if image is in use by an active scheduled post', async () => {
+      mockPrisma.generatedImage.findFirst.mockResolvedValue({
+        id: 'img-in-use',
+        userId: 'user-alice',
+        url: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+      });
+      mockPrisma.scheduledPost.findFirst.mockResolvedValue({
+        id: 'sched-1',
+        status: 'SCHEDULED',
+      });
+
+      await expect(service.deleteImage('user-alice', 'img-in-use')).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.generatedImage.delete).not.toHaveBeenCalled();
+      mockPrisma.scheduledPost.findFirst.mockResolvedValue(null);
     });
   });
 });

@@ -59,7 +59,7 @@ describe('NotificationsService', () => {
         message: 'Your image is ready',
       });
 
-      expect(result.id).toBe('notif-1');
+      expect(result?.id).toBe('notif-1');
       expect(mockEventsGateway.emitToUser).toHaveBeenCalledWith('user-1', 'notification.new', expect.any(Object));
     });
   });

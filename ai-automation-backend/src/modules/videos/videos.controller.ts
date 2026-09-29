@@ -1,16 +1,29 @@
-import { Controller, Post, Get, Delete, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Delete,
+  Patch,
+  Body,
+  Param,
+  Query,
+  Headers,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { VideosService } from './videos.service';
 import { GenerateVideoDto } from './dto/generate-video.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('videos')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('api/v1/videos')
 export class VideosController {
-  constructor(private videosService: VideosService) {}
+  constructor(private readonly videosService: VideosService) {}
 
   @Post('generate')
   generate(@CurrentUser() user: any, @Body() dto: GenerateVideoDto) {
@@ -22,6 +35,11 @@ export class VideosController {
     return this.videosService.getVideos(user.id, +page, +limit);
   }
 
+  @Get(':id/status')
+  getVideoStatus(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.videosService.getVideoStatus(user.id, id);
+  }
+
   @Delete(':id')
   deleteVideo(@CurrentUser() user: any, @Param('id') id: string) {
     return this.videosService.deleteVideo(user.id, id);
@@ -30,5 +48,16 @@ export class VideosController {
   @Patch(':id/favorite')
   toggleFavorite(@CurrentUser() user: any, @Param('id') id: string) {
     return this.videosService.toggleFavorite(user.id, id);
+  }
+
+  @Public()
+  @Post('webhook')
+  handleWebhook(
+    @Headers() headers: Record<string, string>,
+    @Req() req: any,
+    @Body() body: any,
+  ) {
+    const rawBody = typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(body);
+    return this.videosService.handleWebhook(headers, rawBody, body);
   }
 }
