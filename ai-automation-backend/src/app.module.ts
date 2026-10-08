@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { configuration, validationSchema } from './config/configuration';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -18,6 +19,7 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AssetsModule } from './modules/assets/assets.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -32,7 +34,7 @@ import { AppService } from './app.service';
     }),
 
     // ─── Rate Limiting ────────────────────────────────────────────────
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 120 }]),
 
     // ─── Database ────────────────────────────────────────────────────
     DatabaseModule,
@@ -77,8 +79,18 @@ import { AppService } from './app.service';
 
     // ─── Assets (Upload from Device) ──────────────────────────────────
     AssetsModule,
+
+    // ─── Admin (RBAC Control Center) ─────────────────────────────────
+    AdminModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}
+

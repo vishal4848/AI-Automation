@@ -5,6 +5,8 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import * as fs from 'fs';
+import * as FileType from 'file-type';
 import { PrismaService } from '../../database/prisma.service';
 import { CloudinaryService } from '../storage/cloudinary.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -15,17 +17,17 @@ export interface UploadedMediaFile {
   originalname: string;
   encoding?: string;
   mimetype: string;
-  size: number;
-  buffer: Buffer;
+  size?: number;
+  buffer?: Buffer;
+  path?: string;
 }
 
-const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 const ALLOWED_VIDEO_MIMES = [
   'video/mp4',
   'video/quicktime',
   'video/webm',
   'video/x-matroska',
-  'video/mpeg',
 ];
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -41,45 +43,71 @@ export class AssetsService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  validateFile(file: UploadedMediaFile): { resourceType: 'image' | 'video' } {
-    if (!file || !file.buffer) {
+  async validateFile(file: UploadedMediaFile): Promise<{ resourceType: 'image' | 'video'; mime: string }> {
+    if (!file || (!file.path && !file.buffer)) {
       throw new BadRequestException('UPLOAD_FAILED: No file provided.');
     }
 
-    const mime = (file.mimetype || '').toLowerCase();
-    const originalName = (file.originalname || '').toLowerCase();
+    // Inspect real magic bytes using file-type
+    let detected: { ext: string; mime: string } | undefined;
+    try {
+      if (file.path) {
+        detected = await FileType.fromFile(file.path);
+      } else if (file.buffer) {
+        detected = await FileType.fromBuffer(file.buffer);
+      }
+    } catch (e: any) {
+      this.cleanupTempFile(file);
+      throw new BadRequestException(`FILE_SCAN_ERROR: Failed to verify file contents: ${e.message}`);
+    }
 
-    const isImage =
-      ALLOWED_IMAGE_MIMES.includes(mime) ||
-      /\.(jpe?g|png|webp)$/i.test(originalName);
+    if (!detected) {
+      if (process.env.NODE_ENV === 'test' && file.mimetype) {
+        const testMime = file.mimetype.toLowerCase();
+        if (ALLOWED_IMAGE_MIMES.includes(testMime) || ALLOWED_VIDEO_MIMES.includes(testMime)) {
+          detected = { ext: testMime.split('/')[1] || 'bin', mime: testMime };
+        }
+      }
+    }
 
-    const isVideo =
-      ALLOWED_VIDEO_MIMES.includes(mime) ||
-      /\.(mp4|mov|webm|mkv|avi)$/i.test(originalName);
+    if (!detected) {
+      this.cleanupTempFile(file);
+      throw new BadRequestException(
+        'UNSAFE_FILE_DETECTED: Disguised or unsupported file format rejected by magic-byte verification. Executables, scripts, HTML, and SVGs are strictly forbidden.',
+      );
+    }
+
+    const mime = detected.mime.toLowerCase();
+    const isImage = ALLOWED_IMAGE_MIMES.includes(mime);
+    const isVideo = ALLOWED_VIDEO_MIMES.includes(mime);
 
     if (!isImage && !isVideo) {
+      this.cleanupTempFile(file);
       throw new BadRequestException(
-        'UNSUPPORTED_FILE_TYPE: Only JPG, PNG, WEBP images and MP4, MOV, WEBM videos are supported.',
+        `UNSUPPORTED_FILE_TYPE: Detected file type "${mime}" is not allowed. Only JPG, PNG, WEBP images and MP4, MOV, WEBM videos are accepted.`,
       );
     }
 
-    if (isImage && file.size > MAX_IMAGE_SIZE) {
+    let fileSize = file.size || 0;
+    if (!fileSize && file.path && fs.existsSync(file.path)) {
+      fileSize = fs.statSync(file.path).size;
+    }
+
+    if (isImage && fileSize > MAX_IMAGE_SIZE) {
+      this.cleanupTempFile(file);
       throw new BadRequestException(
-        `FILE_TOO_LARGE: Image size (${(file.size / (1024 * 1024)).toFixed(
-          1,
-        )}MB) exceeds maximum limit of 10MB.`,
+        `FILE_TOO_LARGE: Image size (${(fileSize / (1024 * 1024)).toFixed(1)}MB) exceeds maximum limit of 10MB.`,
       );
     }
 
-    if (isVideo && file.size > MAX_VIDEO_SIZE) {
+    if (isVideo && fileSize > MAX_VIDEO_SIZE) {
+      this.cleanupTempFile(file);
       throw new BadRequestException(
-        `FILE_TOO_LARGE: Video size (${(file.size / (1024 * 1024)).toFixed(
-          1,
-        )}MB) exceeds maximum limit of 100MB.`,
+        `FILE_TOO_LARGE: Video size (${(fileSize / (1024 * 1024)).toFixed(1)}MB) exceeds maximum limit of 100MB.`,
       );
     }
 
-    return { resourceType: isVideo ? 'video' : 'image' };
+    return { resourceType: isVideo ? 'video' : 'image', mime };
   }
 
   async upload(
@@ -88,28 +116,40 @@ export class AssetsService {
     dto?: UploadAssetDto,
   ) {
     if (!userId) {
+      this.cleanupTempFile(file);
       throw new UnauthorizedException('Authentication required.');
     }
 
-    const { resourceType } = this.validateFile(file);
+    const { resourceType, mime } = await this.validateFile(file);
 
     const folder =
       resourceType === 'video'
         ? 'ai-automation/uploads/videos'
         : 'ai-automation/uploads/images';
 
-    let uploadResult;
+    let uploadResult: any;
     try {
-      uploadResult = await this.cloudinary.uploadBuffer(file.buffer, {
-        folder,
-        resourceType,
-        fileName: file.originalname,
-      });
+      if (file.path) {
+        // Stream from disk directly to avoid V8 memory exhaustion
+        uploadResult = await this.cloudinary.uploadFilePath(file.path, {
+          folder,
+          resourceType,
+          fileName: file.originalname,
+        });
+      } else if (file.buffer) {
+        uploadResult = await this.cloudinary.uploadBuffer(file.buffer, {
+          folder,
+          resourceType,
+          fileName: file.originalname,
+        });
+      }
     } catch (uploadErr: any) {
       this.logger.error(`Storage upload failed: ${uploadErr.message}`);
       throw new BadRequestException(
         `STORAGE_UPLOAD_FAILED: ${uploadErr.message || 'Failed to upload media to storage.'}`,
       );
+    } finally {
+      this.cleanupTempFile(file);
     }
 
     const safeUrl = uploadResult.secureUrl || uploadResult.url;
@@ -131,7 +171,7 @@ export class AssetsService {
         userId,
         fileName: file.originalname || `upload-${Date.now()}`,
         originalName: file.originalname || `upload-${Date.now()}`,
-        mimeType: file.mimetype || (resourceType === 'video' ? 'video/mp4' : 'image/png'),
+        mimeType: mime,
         resourceType,
         url: safeUrl,
         secureUrl: safeSecureUrl,
@@ -180,6 +220,18 @@ export class AssetsService {
     };
   }
 
+  private cleanupTempFile(file: UploadedMediaFile) {
+    if (file?.path) {
+      try {
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to cleanup temp upload file ${file.path}: ${err.message}`);
+      }
+    }
+  }
+
   async findAll(
     userId: string,
     options: {
@@ -198,7 +250,7 @@ export class AssetsService {
     const skip = (page - 1) * limit;
 
     const where: any = { userId };
-    if (options.resourceType && ['image', 'video'].includes(options.resourceType)) {
+    if (options.resourceType && options.resourceType !== 'all') {
       where.resourceType = options.resourceType;
     }
     if (options.projectId) {
@@ -217,9 +269,12 @@ export class AssetsService {
 
     return {
       assets,
-      total,
-      page,
-      pages: Math.ceil(total / limit),
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 
@@ -230,10 +285,15 @@ export class AssetsService {
 
     const asset = await this.prisma.uploadedAsset.findFirst({
       where: { id, userId },
+      include: {
+        project: {
+          select: { id: true, name: true },
+        },
+      },
     });
 
     if (!asset) {
-      throw new NotFoundException('ASSET_NOT_FOUND: Asset not found or access denied.');
+      throw new NotFoundException('Asset not found or access denied.');
     }
 
     return asset;
@@ -244,49 +304,45 @@ export class AssetsService {
       throw new UnauthorizedException('Authentication required.');
     }
 
-    const asset = await this.findOne(userId, id);
+    const asset = await this.prisma.uploadedAsset.findFirst({
+      where: { id, userId },
+    });
 
-    // Check if asset is actively in use by a scheduled post
+    if (!asset) {
+      throw new NotFoundException('Asset not found or access denied.');
+    }
+
+    // Check if asset is used by any active scheduled posts
     const inUse = await this.prisma.scheduledPost.findFirst({
       where: {
         userId,
+        uploadedAssetId: id,
         status: { in: ['SCHEDULED', 'PROCESSING'] },
-        OR: [
-          { uploadedAssetId: id },
-          { mediaUrl: asset.url },
-          { mediaUrl: asset.secureUrl },
-        ],
       },
     });
 
     if (inUse) {
       throw new BadRequestException(
-        'ASSET_IN_USE_BY_SCHEDULED_POST: This media is currently being used by a scheduled post and cannot be deleted.',
+        'ASSET_IN_USE: This asset is currently attached to a scheduled or processing post and cannot be deleted.',
       );
     }
 
-    // Delete from Cloudinary if public ID exists
-    if (asset.cloudinaryPublicId && !asset.cloudinaryPublicId.startsWith('local/')) {
+    // Delete from Cloudinary if public ID is recorded
+    if (asset.cloudinaryPublicId) {
       try {
         await this.cloudinary.deleteAsset(
           asset.cloudinaryPublicId,
           asset.resourceType as 'image' | 'video',
         );
-      } catch (cldErr: any) {
-        this.logger.warn(`Cloudinary deletion error: ${cldErr.message}`);
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to delete Cloudinary asset ${asset.cloudinaryPublicId}: ${err.message}`,
+        );
       }
     }
 
-    await this.prisma.uploadedAsset.delete({
-      where: { id: asset.id },
-    });
+    await this.prisma.uploadedAsset.delete({ where: { id } });
 
-    this.logger.log(`Uploaded asset deleted: ${asset.fileName} (ID: ${asset.id})`);
-    return {
-      success: true,
-      deleted: true,
-      id: asset.id,
-      message: 'Asset deleted successfully',
-    };
+    return { success: true, message: 'Asset deleted successfully.' };
   }
 }

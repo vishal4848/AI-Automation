@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from 'react';
-import { User, Bell, Lock, CreditCard, Palette, Monitor } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { User, Bell, Lock, CreditCard, Palette, Monitor, CheckCircle2, AlertCircle, Loader2, Camera, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTheme } from 'next-themes';
+import { useAuthStore } from '@/store/auth-store';
 
 const TABS = [
   { id: 'profile', label: 'Profile', icon: User },
@@ -13,186 +15,389 @@ const TABS = [
 ];
 
 export default function SettingsPage() {
+  const { theme, setTheme } = useTheme();
+  const { user, setUser } = useAuthStore();
+
   const [activeTab, setActiveTab] = useState('profile');
+  const [mounted, setMounted] = useState(false);
+
+  // Profile form state
+  const [name, setName] = useState('');
+  const [bio, setBio] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Billing modal states (Truthful "Coming Soon" states)
+  const [billingNotice, setBillingNotice] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+    if (user) {
+      setName(user.name || '');
+      setBio((user as any).bio || '');
+      setAvatarUrl((user as any).avatarUrl || '');
+    }
+  }, [user]);
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingAvatar(true);
+    setBanner(null);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      // Upload using assets API
+      const res = await fetch('/api/v1/assets/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && (data.url || data.secureUrl)) {
+        const newUrl = data.secureUrl || data.url;
+        setAvatarUrl(newUrl);
+
+        // Update profile in backend
+        const updateRes = await fetch('/api/auth/profile', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ avatarUrl: newUrl }),
+        });
+
+        const updateData = await updateRes.json().catch(() => ({}));
+        if (updateRes.ok && updateData.data) {
+          setUser({ ...user!, ...updateData.data, avatarUrl: newUrl });
+          setBanner({ type: 'success', text: 'Avatar updated successfully.' });
+        }
+      } else {
+        setBanner({ type: 'error', text: data.error || 'Failed to upload avatar image.' });
+      }
+    } catch (err: any) {
+      setBanner({ type: 'error', text: err.message || 'Error uploading avatar.' });
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    setBanner(null);
+
+    try {
+      const res = await fetch('/api/auth/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), bio: bio.trim() }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setUser({ ...user!, ...data.data });
+        setBanner({ type: 'success', text: 'Profile updated successfully.' });
+      } else {
+        setBanner({ type: 'error', text: data.error || 'Failed to save profile changes.' });
+      }
+    } catch (err: any) {
+      setBanner({ type: 'error', text: err.message || 'Network error updating profile.' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const getInitials = (n?: string) => {
+    if (!n) return 'U';
+    return n.trim().slice(0, 1).toUpperCase();
+  };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto flex flex-col md:flex-row gap-8 h-[calc(100vh-4rem)]">
+    <div className="max-w-5xl mx-auto flex flex-col md:flex-row gap-6 min-h-[calc(100vh-100px)]">
       {/* Sidebar Navigation */}
-      <div className="w-full md:w-64 flex-shrink-0">
-        <h1 className="text-2xl font-bold mb-6">Settings</h1>
-        <div className="flex md:flex-col gap-2 overflow-x-auto pb-4 md:pb-0">
-          {TABS.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors whitespace-nowrap ${
-                activeTab === tab.id 
-                  ? 'bg-blue-50 text-blue-700' 
-                  : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              <tab.icon size={18} className={activeTab === tab.id ? 'text-blue-600' : 'text-gray-400'} />
-              {tab.label}
-            </button>
-          ))}
+      <div className="w-full md:w-60 flex-shrink-0">
+        <h1 className="text-2xl font-bold tracking-tight mb-4">Settings</h1>
+        <div className="flex md:flex-col gap-1.5 overflow-x-auto pb-2 md:pb-0">
+          {TABS.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => { setActiveTab(tab.id); setBanner(null); }}
+                className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+                  isActive
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-card hover:text-foreground'
+                }`}
+              >
+                <tab.icon size={16} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 bg-white border border-gray-200 rounded-2xl shadow-sm overflow-y-auto">
+      <div className="flex-1 bg-card border border-border rounded-3xl p-6 sm:p-8 shadow-sm overflow-y-auto">
+        {banner && (
+          <div
+            className={`p-3.5 rounded-xl text-xs flex items-center gap-2.5 mb-6 ${
+              banner.type === 'success'
+                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                : 'bg-destructive/10 text-destructive border border-destructive/20'
+            }`}
+          >
+            {banner.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+            <span>{banner.text}</span>
+          </div>
+        )}
+
         <AnimatePresence mode="wait">
+          {/* ─── PROFILE TAB ─── */}
           {activeTab === 'profile' && (
             <motion.div
               key="profile"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="p-8 space-y-8"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
             >
               <div>
-                <h2 className="text-xl font-bold">Public Profile</h2>
-                <p className="text-gray-500 text-sm mt-1">This is how others will see you on the platform.</p>
+                <h2 className="text-lg font-bold text-foreground">Public Profile</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Manage your personal details and public presentation.</p>
               </div>
 
-              <div className="flex items-center gap-6">
-                <div className="w-24 h-24 bg-gradient-to-tr from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-3xl font-bold shadow-md">
-                  A
+              {/* Avatar Section */}
+              <div className="flex items-center gap-5 pt-2">
+                <div className="relative group">
+                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-violet-600 to-indigo-600 flex items-center justify-center text-white text-2xl font-bold shadow-md overflow-hidden border border-border">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      getInitials(name || user?.name || user?.email)
+                    )}
+                  </div>
+                  {isUploadingAvatar && (
+                    <div className="absolute inset-0 bg-black/60 rounded-2xl flex items-center justify-center">
+                      <Loader2 className="w-5 h-5 text-white animate-spin" />
+                    </div>
+                  )}
                 </div>
+
                 <div>
-                  <button className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium transition-colors">
-                    Change Avatar
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={handleAvatarChange}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingAvatar}
+                    className="px-3.5 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-xl text-xs font-semibold transition-colors inline-flex items-center gap-1.5"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Change Avatar</span>
                   </button>
-                  <p className="text-xs text-gray-400 mt-2">JPG, GIF or PNG. Max size of 800K</p>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">JPG, PNG, or WEBP. Max size 10MB.</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">First Name</label>
-                  <input type="text" defaultValue="Alex" className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500" />
+              <form onSubmit={handleSaveProfile} className="space-y-4 pt-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">Display Name</label>
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Your name"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">Email Address</label>
+                    <input
+                      type="email"
+                      value={user?.email || ''}
+                      disabled
+                      className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground cursor-not-allowed"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2 space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">Bio</label>
+                    <textarea
+                      rows={3}
+                      value={bio}
+                      onChange={(e) => setBio(e.target.value)}
+                      placeholder="Tell us a little bit about your brand or workflow..."
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Last Name</label>
-                  <input type="text" defaultValue="Johnson" className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500" />
+
+                <div className="pt-4 border-t border-border flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="px-5 py-2 bg-primary text-primary-foreground font-semibold rounded-xl text-xs hover:bg-primary/90 transition-all gap-1.5 inline-flex items-center disabled:opacity-50"
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <span>Save Changes</span>
+                    )}
+                  </button>
                 </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Bio</label>
-                  <textarea className="w-full h-24 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 resize-none" defaultValue="AI enthusiast and digital creator." />
-                </div>
+              </form>
+            </motion.div>
+          )}
+
+          {/* ─── APPEARANCE TAB ─── */}
+          {activeTab === 'appearance' && (
+            <motion.div
+              key="appearance"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              <div>
+                <h2 className="text-lg font-bold text-foreground">Appearance</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Customize how the interface looks and feels on your devices.</p>
               </div>
 
-              <div className="pt-4 border-t border-gray-100 flex justify-end">
-                <button className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
-                  Save Changes
-                </button>
+              <div>
+                <h3 className="text-xs font-semibold text-foreground mb-3">Theme Selection</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {[
+                    { id: 'dark', name: 'Dark Mode', preview: 'bg-zinc-950 border-zinc-800' },
+                    { id: 'light', name: 'Light Mode', preview: 'bg-zinc-100 border-zinc-300' },
+                    { id: 'system', name: 'System Default', preview: 'bg-gradient-to-r from-zinc-100 to-zinc-950 border-zinc-500' },
+                  ].map((t) => {
+                    const isSelected = mounted && theme === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setTheme(t.id)}
+                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all text-left group ${
+                          isSelected
+                            ? 'border-primary ring-2 ring-primary/30 bg-accent/40'
+                            : 'border-border hover:border-border/80 bg-background'
+                        }`}
+                      >
+                        <div className={`w-full aspect-video rounded-xl border ${t.preview} shadow-sm relative overflow-hidden flex items-center justify-center`}>
+                          <div className="w-12 h-6 rounded-md bg-foreground/10 border border-foreground/10" />
+                        </div>
+                        <span className="text-xs font-semibold text-foreground">{t.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </motion.div>
           )}
 
+          {/* ─── BILLING TAB ─── */}
           {activeTab === 'billing' && (
             <motion.div
               key="billing"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="p-8 space-y-8"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
             >
               <div>
-                <h2 className="text-xl font-bold">Billing & Credits</h2>
-                <p className="text-gray-500 text-sm mt-1">Manage your subscription plan and AI generation credits.</p>
+                <h2 className="text-lg font-bold text-foreground">Billing & Plans</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Review your current plan balance and generation credits.</p>
               </div>
 
-              <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-8 rounded-2xl text-white shadow-lg relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
-                <div className="relative z-10 flex justify-between items-center">
+              {billingNotice && (
+                <div className="p-3.5 rounded-xl text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-between">
+                  <span>{billingNotice}</span>
+                  <button onClick={() => setBillingNotice(null)} className="text-muted-foreground hover:text-foreground">✕</button>
+                </div>
+              )}
+
+              {/* Current Plan Card */}
+              <div className="bg-gradient-to-tr from-violet-900/40 via-purple-950/40 to-slate-900 border border-border p-6 rounded-2xl relative overflow-hidden space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                   <div>
-                    <p className="text-slate-400 font-medium">Current Plan</p>
-                    <h3 className="text-3xl font-bold mt-1 text-white">Pro Creator</h3>
-                    <p className="text-sm text-slate-300 mt-4">Renews on April 15, 2024</p>
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-primary">Active Plan</span>
+                    <h3 className="text-2xl font-bold text-foreground mt-0.5">Starter Tier</h3>
+                    <p className="text-xs text-muted-foreground mt-1">Free community tier for personal content automation.</p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-slate-400 font-medium mb-2">Credits Remaining</p>
-                    <div className="flex items-end gap-2 justify-end">
-                      <span className="text-4xl font-bold">2,450</span>
-                      <span className="text-slate-400 mb-1">/ 5,000</span>
+
+                  <div className="sm:text-right">
+                    <span className="text-[11px] font-semibold text-muted-foreground">Credits Balance</span>
+                    <div className="text-3xl font-extrabold text-foreground mt-0.5 flex items-center sm:justify-end gap-1.5">
+                      <Sparkles className="w-5 h-5 text-amber-400" />
+                      <span>{user?.credits ?? 100}</span>
                     </div>
                   </div>
                 </div>
-                <div className="mt-8 flex gap-3 relative z-10">
-                  <button className="px-4 py-2 bg-white text-slate-900 font-bold rounded-lg hover:bg-slate-100 transition-colors">
+
+                <div className="flex flex-wrap gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setBillingNotice('Stripe / Payment Gateway integration is currently in private preview. Automated credit purchases will be available upon public release.')}
+                    className="px-4 py-2 bg-primary text-primary-foreground font-semibold rounded-xl text-xs hover:bg-primary/90 transition-all"
+                  >
                     Top Up Credits
                   </button>
-                  <button className="px-4 py-2 border border-slate-600 text-white font-medium rounded-lg hover:bg-slate-700 transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => setBillingNotice('Subscription tier changes will be enabled once merchant billing is activated.')}
+                    className="px-4 py-2 border border-border bg-card text-foreground font-semibold rounded-xl text-xs hover:bg-accent transition-all"
+                  >
                     Change Plan
                   </button>
                 </div>
               </div>
 
-              <div>
-                <h3 className="font-bold text-lg mb-4">Payment Methods</h3>
-                <div className="border border-gray-200 rounded-xl p-4 flex justify-between items-center bg-gray-50">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-8 bg-white border border-gray-200 rounded flex items-center justify-center font-bold text-blue-800 italic">
-                      VISA
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-800">Visa ending in 4242</p>
-                      <p className="text-xs text-gray-500">Expires 12/25</p>
-                    </div>
+              {/* Payment Methods */}
+              <div className="space-y-3 pt-2">
+                <h3 className="font-bold text-sm text-foreground">Saved Payment Methods</h3>
+                <div className="border border-border rounded-2xl p-4 bg-background/50 flex justify-between items-center text-xs">
+                  <div className="text-muted-foreground">
+                    No payment methods on file. All platform usage is currently subsidized via starter credits.
                   </div>
-                  <button className="text-sm font-medium text-gray-500 hover:text-red-600 transition-colors">Remove</button>
                 </div>
               </div>
             </motion.div>
           )}
 
-          {activeTab === 'appearance' && (
-            <motion.div
-              key="appearance"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="p-8 space-y-8"
-            >
-              <div>
-                <h2 className="text-xl font-bold">Appearance</h2>
-                <p className="text-gray-500 text-sm mt-1">Customize how the application looks to you.</p>
-              </div>
-
-              <div>
-                <h3 className="text-sm font-medium text-gray-700 mb-4">Theme</h3>
-                <div className="grid grid-cols-3 gap-4">
-                  {[
-                    { id: 'light', name: 'Light', bg: 'bg-gray-100' },
-                    { id: 'dark', name: 'Dark', bg: 'bg-gray-900' },
-                    { id: 'system', name: 'System', bg: 'bg-gradient-to-r from-gray-100 to-gray-900' },
-                  ].map(theme => (
-                    <button key={theme.id} className="flex flex-col items-center gap-2 group">
-                      <div className={`w-full aspect-video rounded-lg border-2 ${theme.id === 'light' ? 'border-blue-500' : 'border-gray-200 group-hover:border-gray-300'} ${theme.bg} relative overflow-hidden shadow-sm`}>
-                        <div className="absolute inset-4 bg-white rounded shadow-sm opacity-50 flex flex-col gap-2 p-2">
-                           <div className="w-1/2 h-2 bg-gray-200 rounded"></div>
-                           <div className="w-full h-8 bg-gray-200 rounded"></div>
-                        </div>
-                      </div>
-                      <span className="text-sm font-medium text-gray-700">{theme.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          )}
-          
-          {/* Add basic placeholders for other tabs if selected */}
+          {/* ─── ACCOUNT / NOTIFICATIONS PLACEHOLDERS (TRUTHFUL COMING SOON) ─── */}
           {['account', 'notifications'].includes(activeTab) && (
             <motion.div
               key={activeTab}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="p-8 flex flex-col items-center justify-center h-full text-gray-400"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="py-16 flex flex-col items-center justify-center text-center space-y-3"
             >
-              <Monitor size={48} className="mb-4 opacity-20" />
-              <p className="text-lg">Settings for {activeTab} coming soon.</p>
+              <div className="w-12 h-12 rounded-2xl bg-secondary flex items-center justify-center text-muted-foreground">
+                <Monitor className="w-6 h-6" />
+              </div>
+              <h3 className="font-bold text-base text-foreground capitalize">{activeTab} Preferences</h3>
+              <p className="text-xs text-muted-foreground max-w-sm">
+                Advanced {activeTab} settings and automated webhooks are currently under development and will be available in the upcoming update.
+              </p>
             </motion.div>
           )}
         </AnimatePresence>

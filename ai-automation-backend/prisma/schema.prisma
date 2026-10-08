@@ -11,11 +11,15 @@ model User {
   id            String   @id @default(cuid())
   email         String   @unique
   name          String?
-  password      String
+  password      String?
   role          Role     @default(USER)
   isActive      Boolean  @default(true)
   credits       Int      @default(100)
   refreshToken  String?
+  googleId      String?  @unique
+  avatarUrl     String?
+  bio           String?
+  isEmailVerified Boolean @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   
@@ -207,6 +211,7 @@ model GeneratedVideo {
   isFavorite   Boolean  @default(false)
   status       JobStatus @default(PENDING)
   jobId        String?
+  predictionId String?  @unique
   creditsUsed  Int      @default(20)
   metadata     Json?
   createdAt    DateTime @default(now())
@@ -214,6 +219,10 @@ model GeneratedVideo {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   aiModel      AIModel? @relation(fields: [modelId], references: [id])
   favorites    Favorite[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@index([predictionId])
   @@map("generated_videos")
 }
 
@@ -230,6 +239,9 @@ model PromptHistory {
   status         String?
   createdAt      DateTime @default(now())
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, createdAt])
   @@map("prompt_history")
 }
 
@@ -257,6 +269,8 @@ model CreditTransaction {
   metadata    Json?
   createdAt   DateTime @default(now())
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
   @@map("credit_transactions")
 }
 
@@ -270,6 +284,9 @@ model Notification {
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
   @@map("notifications")
 }
 
@@ -296,6 +313,9 @@ model AuditLog {
   userAgent String?
   createdAt DateTime @default(now())
   user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([action])
   @@map("audit_logs")
 }
 
@@ -311,6 +331,8 @@ model UsageLog {
   creditsUsed  Int      @default(0)
   cost         Float    @default(0)
   createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
   @@map("usage_logs")
 }
 
@@ -402,5 +424,18 @@ model UploadedAsset {
   @@index([userId, resourceType])
   @@index([userId, projectId])
   @@map("uploaded_assets")
+}
+
+model OtpVerification {
+  id        String   @id @default(cuid())
+  email     String
+  otpHash   String
+  purpose   String   @default("REGISTRATION") // REGISTRATION, PASSWORD_RESET
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email, purpose])
+  @@map("otp_verifications")
 }
 

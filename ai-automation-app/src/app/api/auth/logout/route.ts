@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { backendPost } from '@/lib/api-client';
 
 export const runtime = 'nodejs';
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
+    await backendPost('/api/v1/auth/logout', {}, req).catch(() => {});
     const cookieStore = await cookies();
     cookieStore.set('auth_token', '', {
-      httpOnly: true,
+      httpOnly: false,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
@@ -20,4 +22,3 @@ export async function POST() {
     return NextResponse.json({ success: true, message: 'Logged out.' });
   }
 }
-

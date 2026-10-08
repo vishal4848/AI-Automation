@@ -61,6 +61,20 @@ export async function backendGet<T>(path: string, req?: Request): Promise<T> {
   return response.json();
 }
 
+export async function backendPatch<T>(path: string, body: any, req?: Request): Promise<T> {
+  const response = await backendFetch(path, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  }, req);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Backend error' }));
+    const err: any = new Error(error.message || `Backend error: ${response.status}`);
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+}
+
 export async function backendDelete<T>(path: string, req?: Request): Promise<T> {
   const response = await backendFetch(path, { method: 'DELETE' }, req);
   if (!response.ok) {

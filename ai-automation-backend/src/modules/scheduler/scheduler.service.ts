@@ -1,4 +1,6 @@
 import { Injectable, BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
@@ -17,6 +19,46 @@ export class SchedulerService {
     private readonly facebookPublisher: FacebookPublisher,
     private readonly linkedinPublisher: LinkedInPublisher,
   ) {}
+
+  private resolveLocalMediaToDataUri(urlOrPath: string): string | null {
+    if (!urlOrPath || typeof urlOrPath !== 'string') return null;
+    const cleanPath = urlOrPath.split('?')[0].replace(/^\/+/, '');
+
+    const candidates = [
+      path.resolve(process.cwd(), '..', 'ai-automation-app', 'public', cleanPath),
+      path.resolve(process.cwd(), 'public', cleanPath),
+      path.resolve(__dirname, '../../../../ai-automation-app/public', cleanPath),
+      path.resolve(__dirname, '../../../public', cleanPath),
+    ];
+
+    for (const filePath of candidates) {
+      if (fs.existsSync(filePath)) {
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            const ext = path.extname(filePath).toLowerCase();
+            const mimeMap: Record<string, string> = {
+              '.png': 'image/png',
+              '.jpg': 'image/jpeg',
+              '.jpeg': 'image/jpeg',
+              '.webp': 'image/webp',
+              '.gif': 'image/gif',
+              '.svg': 'image/svg+xml',
+              '.mp4': 'video/mp4',
+              '.mov': 'video/quicktime',
+              '.webm': 'video/webm',
+            };
+            const mime = mimeMap[ext] || 'application/octet-stream';
+            const buffer = fs.readFileSync(filePath);
+            return `data:${mime};base64,${buffer.toString('base64')}`;
+          }
+        } catch {
+          // ignore read error
+        }
+      }
+    }
+    return null;
+  }
 
   async executePublish(postId: string): Promise<any> {
     const post = await this.prisma.scheduledPost.findUnique({
@@ -124,6 +166,7 @@ export class SchedulerService {
     const assetId = dto.mediaAssetId || dto.uploadedAssetId;
     let verifiedUploadedAssetId: string | null = null;
     let finalMediaUrl = dto.mediaUrl;
+    let foundMediaPrompt: string | null = null;
 
     if (assetId) {
       let foundMedia: any = null;
@@ -148,6 +191,7 @@ export class SchedulerService {
         if (genImg) {
           foundMedia = genImg;
           finalMediaUrl = genImg.url || finalMediaUrl;
+          foundMediaPrompt = genImg.prompt;
         }
       }
 
@@ -159,6 +203,7 @@ export class SchedulerService {
         if (genVid) {
           foundMedia = genVid;
           finalMediaUrl = genVid.url || finalMediaUrl;
+          foundMediaPrompt = genVid.prompt;
         }
       }
 
@@ -169,6 +214,22 @@ export class SchedulerService {
 
     if (!finalMediaUrl || typeof finalMediaUrl !== 'string') {
       throw new BadRequestException('MEDIA_URL_REQUIRED: Media URL is required.');
+    }
+
+    // Resolve local relative paths or localhost URLs to self-contained data URIs
+    if (finalMediaUrl.startsWith('/')) {
+      const dataUri = this.resolveLocalMediaToDataUri(finalMediaUrl);
+      if (dataUri) {
+        finalMediaUrl = dataUri;
+      }
+    } else if (finalMediaUrl.startsWith('http://localhost') || finalMediaUrl.startsWith('http://127.0.0.1')) {
+      try {
+        const urlObj = new URL(finalMediaUrl);
+        const dataUri = this.resolveLocalMediaToDataUri(urlObj.pathname);
+        if (dataUri) {
+          finalMediaUrl = dataUri;
+        }
+      } catch {}
     }
 
     if (finalMediaUrl.includes('localhost') || finalMediaUrl.includes('127.0.0.1')) {
@@ -201,7 +262,8 @@ export class SchedulerService {
       finalMediaUrl.endsWith('.mp4') ||
       finalMediaUrl.endsWith('.mov') ||
       finalMediaUrl.endsWith('.webm') ||
-      finalMediaUrl.includes('/video/upload/');
+      finalMediaUrl.includes('/video/upload/') ||
+      finalMediaUrl.startsWith('data:video/');
 
     for (const accId of targetAccountIds) {
       const account = await this.prisma.socialAccount.findFirst({
@@ -221,8 +283,18 @@ export class SchedulerService {
       const platformLower = postPlatform.toLowerCase();
 
       // Platform-media compatibility check
-      if (platformLower === 'instagram' && isVideo && finalMediaUrl.endsWith('.webm')) {
-        throw new BadRequestException('PLATFORM_MEDIA_INCOMPATIBLE: Instagram only supports MP4 or MOV video formats.');
+      if (platformLower === 'instagram') {
+        if (isVideo && finalMediaUrl.endsWith('.webm')) {
+          throw new BadRequestException('PLATFORM_MEDIA_INCOMPATIBLE: Instagram only supports MP4 or MOV video formats.');
+        }
+        if (finalMediaUrl.startsWith('data:')) {
+          if (foundMediaPrompt && !isVideo) {
+            const encoded = encodeURIComponent(foundMediaPrompt);
+            finalMediaUrl = `https://image.pollinations.ai/prompt/${encoded}?model=flux&width=1024&height=1024&nologo=true`;
+          } else {
+            throw new BadRequestException('MEDIA_URL_INVALID: Instagram requires a public HTTPS media link (e.g. Cloudinary). Local files cannot be fetched by Instagram.');
+          }
+        }
       }
 
       validatedAccounts.push({ account, postPlatform });
@@ -376,5 +448,99 @@ export class SchedulerService {
     }
 
     return post;
+  }
+
+  async updateScheduledPost(
+    userId: string,
+    postId: string,
+    dto: {
+      caption?: string;
+      scheduledAtUTC?: string;
+      socialAccountId?: string;
+      mediaUrl?: string;
+    },
+  ) {
+    const post = await this.prisma.scheduledPost.findFirst({
+      where: { id: postId, userId },
+      include: { socialAccount: true },
+    });
+
+    if (!post) {
+      throw new NotFoundException('Scheduled post not found.');
+    }
+
+    if (post.status === 'PUBLISHED') {
+      throw new BadRequestException('Cannot edit an already published post.');
+    }
+
+    if (post.status === 'PROCESSING') {
+      throw new BadRequestException('Cannot edit a post that is currently being published.');
+    }
+
+    const dataToUpdate: any = {};
+    if (dto.caption !== undefined) dataToUpdate.caption = dto.caption;
+    if (dto.mediaUrl) {
+      let resolvedUrl = dto.mediaUrl;
+      if (resolvedUrl.startsWith('/')) {
+        resolvedUrl = this.resolveLocalMediaToDataUri(resolvedUrl) || resolvedUrl;
+      }
+      dataToUpdate.mediaUrl = resolvedUrl;
+    }
+    if (dto.socialAccountId) {
+      const acc = await this.prisma.socialAccount.findFirst({
+        where: { id: dto.socialAccountId, userId },
+      });
+      if (!acc) throw new BadRequestException('Selected social account not found.');
+      dataToUpdate.socialAccountId = acc.id;
+      dataToUpdate.platform = acc.platform;
+    }
+
+    let delayUpdated = false;
+    let newDelay = 0;
+    if (dto.scheduledAtUTC) {
+      const newScheduledDate = new Date(dto.scheduledAtUTC);
+      if (isNaN(newScheduledDate.getTime())) {
+        throw new BadRequestException('Invalid scheduled time format.');
+      }
+      newDelay = newScheduledDate.getTime() - Date.now();
+      if (newDelay < 0) {
+        throw new BadRequestException('Scheduled time must be in the future.');
+      }
+      dataToUpdate.scheduledAtUTC = newScheduledDate;
+      dataToUpdate.status = 'SCHEDULED';
+      delayUpdated = true;
+    }
+
+    const updated = await this.prisma.scheduledPost.update({
+      where: { id: postId },
+      data: dataToUpdate,
+      include: {
+        socialAccount: {
+          select: { id: true, username: true, platform: true },
+        },
+      },
+    });
+
+    // Update BullMQ delayed job
+    if (delayUpdated) {
+      try {
+        await this.publishQueue.remove(`post-${postId}`);
+        await this.publishQueue.add(
+          'publish-post',
+          { postId },
+          {
+            delay: newDelay,
+            jobId: `post-${postId}`,
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 30000 },
+            removeOnComplete: true,
+          },
+        );
+      } catch (e: any) {
+        this.logger.warn(`Failed to update BullMQ queue delay for post ${postId}: ${e.message}`);
+      }
+    }
+
+    return updated;
   }
 }

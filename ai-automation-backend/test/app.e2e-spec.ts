@@ -20,7 +20,31 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/')
       .expect(200)
-      .expect('Hello World!');
+      .expect('Content-Type', /text\/html/)
+      .then((res) => {
+        expect(res.text).toContain('AI Automation Platform API');
+        expect(res.text).toContain('Status: Healthy & Active');
+      });
+  });
+
+  it('/privacy (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200)
+      .expect('Content-Type', /text\/html/)
+      .then((res) => {
+        expect(res.text).toContain('Privacy Policy');
+      });
+  });
+
+  it('/deletion (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/deletion')
+      .expect(200)
+      .expect('Content-Type', /text\/html/)
+      .then((res) => {
+        expect(res.text).toContain('User Data Deletion Instructions');
+      });
   });
 
   afterEach(async () => {

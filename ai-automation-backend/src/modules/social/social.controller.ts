@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Delete, Param, Query, Res, UseGuards, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Body, Delete, Param, Query, Res, UseGuards, Logger, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { SocialService } from './social.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -158,9 +158,17 @@ export class SocialController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Post('token-connect')
-  async connectWithToken(@CurrentUser() user: any, @Body('accessToken') accessToken: string) {
+  async connectWithToken(
+    @CurrentUser() user: any,
+    @Body('accessToken') accessToken?: string,
+    @Body('token') token?: string,
+  ) {
     const userId = typeof user === 'string' ? user : user?.id;
-    const accounts = await this.socialService.connectWithMetaToken(userId, accessToken);
+    const finalToken = (accessToken || token || '').trim();
+    if (!finalToken) {
+      throw new BadRequestException('A valid accessToken is required.');
+    }
+    const accounts = await this.socialService.connectWithMetaToken(userId, finalToken);
     return { success: true, message: `Successfully connected ${accounts.length} account(s).`, data: accounts };
   }
 

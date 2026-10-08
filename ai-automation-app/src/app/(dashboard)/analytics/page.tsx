@@ -1,73 +1,108 @@
 'use client';
 
-import React from 'react';
-import { motion } from 'framer-motion';
-import { BarChart3, TrendingUp, Users, Eye, ThumbsUp, Share2, MessageSquare, ArrowUpRight } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
-import { mockAnalytics } from '@/services/mock-data';
+import React, { useState } from 'react';
+import { BarChart3, TrendingUp, Users, Eye, ThumbsUp, Sparkles, Coins, CalendarCheck } from 'lucide-react';
+import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, PieChart, Pie, Cell } from 'recharts';
+import { useAnalyticsOverview, useAnalyticsUsage } from '@/lib/api/analytics-api';
 
 const COLORS = ['#3b82f6', '#a855f7', '#ec4899', '#10b981', '#f59e0b'];
 
-const platformShare = [
-  { name: 'Instagram', value: 45 },
-  { name: 'LinkedIn', value: 25 },
-  { name: 'Twitter/X', value: 15 },
-  { name: 'TikTok', value: 10 },
-  { name: 'Facebook', value: 5 },
-];
-
 export default function AnalyticsPage() {
+  const [period, setPeriod] = useState('30d');
+  const { data: overview, isLoading: isOverviewLoading } = useAnalyticsOverview(period);
+  const { data: usage, isLoading: isUsageLoading } = useAnalyticsUsage(period);
+
+  const totalAIContent = (overview?.totalImages || 0) + (overview?.totalVideos || 0) + (overview?.totalCaptions || 0);
+
+  const chartData = usage?.data?.length
+    ? usage.data.map((d) => ({
+        date: d.date,
+        content: d.images + d.videos + d.captions,
+        credits: d.credits,
+        images: d.images,
+        videos: d.videos,
+      }))
+    : [];
+
+  const platformShare = [
+    { name: 'Generated Images', value: overview?.totalImages || 0 },
+    { name: 'Generated Videos', value: overview?.totalVideos || 0 },
+    { name: 'Generated Captions', value: overview?.totalCaptions || 0 },
+  ].filter((p) => p.value > 0);
+
+  const displayPlatformShare = platformShare.length > 0 ? platformShare : [
+    { name: 'Images', value: 1 },
+    { name: 'Videos', value: 0 },
+  ];
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Performance Analytics</h1>
-        <p className="text-sm text-muted-foreground">Comprehensive insights into content reach, engagement growth, and AI usage metrics.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Performance Analytics</h1>
+          <p className="text-sm text-muted-foreground">Comprehensive insights into content reach, engagement growth, and AI usage metrics.</p>
+        </div>
+
+        <div className="flex items-center gap-2 bg-card border border-border rounded-xl p-1 self-start">
+          {['7d', '30d', '90d'].map((p) => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                period === p
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {p.toUpperCase()}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Top Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="border-border bg-card rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between text-muted-foreground mb-3">
-            <span className="text-xs font-semibold">Total Reach</span>
+            <span className="text-xs font-semibold">Total Audience Reach</span>
             <div className="p-2 rounded-xl bg-blue-500/10 text-blue-500">
               <Eye size={18} />
             </div>
           </div>
-          <div className="text-2xl font-bold text-foreground">1,245,800</div>
-          <div className="flex items-center gap-1.5 mt-2 text-xs text-emerald-500 font-medium">
-            <TrendingUp size={14} />
-            <span>+24.8% from last month</span>
+          <div className="text-2xl font-bold text-foreground">N/A</div>
+          <div className="flex items-center gap-1.5 mt-2 text-xs text-muted-foreground">
+            <span>Connect social channels for live reach</span>
           </div>
         </Card>
 
         <Card className="border-border bg-card rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between text-muted-foreground mb-3">
-            <span className="text-xs font-semibold">Engagement Rate</span>
+            <span className="text-xs font-semibold">Audience Engagement</span>
             <div className="p-2 rounded-xl bg-purple-500/10 text-purple-500">
               <ThumbsUp size={18} />
             </div>
           </div>
-          <div className="text-2xl font-bold text-foreground">8.42%</div>
-          <div className="flex items-center gap-1.5 mt-2 text-xs text-emerald-500 font-medium">
-            <TrendingUp size={14} />
-            <span>+3.2% vs industry avg</span>
+          <div className="text-2xl font-bold text-foreground">N/A</div>
+          <div className="flex items-center gap-1.5 mt-2 text-xs text-muted-foreground">
+            <span>External API metrics pending</span>
           </div>
         </Card>
 
         <Card className="border-border bg-card rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between text-muted-foreground mb-3">
-            <span className="text-xs font-semibold">Followers Gained</span>
-            <div className="p-2 rounded-xl bg-pink-500/10 text-pink-500">
-              <Users size={18} />
+            <span className="text-xs font-semibold">Credits Available</span>
+            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500">
+              <Coins size={18} />
             </div>
           </div>
-          <div className="text-2xl font-bold text-foreground">+14,250</div>
+          <div className="text-2xl font-bold text-foreground">
+            {isOverviewLoading ? '...' : (overview?.creditsRemaining ?? 0).toLocaleString()}
+          </div>
           <div className="flex items-center gap-1.5 mt-2 text-xs text-emerald-500 font-medium">
-            <TrendingUp size={14} />
-            <span>+18.5% growth rate</span>
+            <Sparkles size={14} />
+            <span>Ready for generation</span>
           </div>
         </Card>
 
@@ -78,10 +113,12 @@ export default function AnalyticsPage() {
               <BarChart3 size={18} />
             </div>
           </div>
-          <div className="text-2xl font-bold text-foreground">2,840</div>
+          <div className="text-2xl font-bold text-foreground">
+            {isOverviewLoading ? '...' : totalAIContent.toLocaleString()}
+          </div>
           <div className="flex items-center gap-1.5 mt-2 text-xs text-emerald-500 font-medium">
             <TrendingUp size={14} />
-            <span>+42% content output</span>
+            <span>{overview?.totalImages || 0} images, {overview?.totalVideos || 0} videos</span>
           </div>
         </Card>
       </div>
@@ -91,54 +128,66 @@ export default function AnalyticsPage() {
         {/* Main Growth Area Chart */}
         <Card className="lg:col-span-2 border-border bg-card rounded-2xl p-6">
           <CardHeader className="px-0 pt-0">
-            <CardTitle className="text-base font-bold">Reach & Engagement Over Time</CardTitle>
-            <CardDescription className="text-xs">Monthly breakdown of impressions and total audience interactions.</CardDescription>
+            <CardTitle className="text-base font-bold">AI Content Activity Over Time</CardTitle>
+            <CardDescription className="text-xs">Real-time daily breakdown of media generations and credits consumed.</CardDescription>
           </CardHeader>
           <div className="h-72 w-full pt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={mockAnalytics}>
-                <defs>
-                  <linearGradient id="colorReach" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                <XAxis dataKey="month" stroke="#888" fontSize={11} />
-                <YAxis stroke="#888" fontSize={11} />
-                <RechartsTooltip contentStyle={{ backgroundColor: '#1e1e24', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '12px' }} />
-                <Area type="monotone" dataKey="reach" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorReach)" />
-              </AreaChart>
-            </ResponsiveContainer>
+            {chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData}>
+                  <defs>
+                    <linearGradient id="colorContent" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                  <XAxis dataKey="date" stroke="#888" fontSize={11} />
+                  <YAxis stroke="#888" fontSize={11} allowDecimals={false} />
+                  <RechartsTooltip contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px', fontSize: '12px' }} />
+                  <Area type="monotone" dataKey="content" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorContent)" name="Generations" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                {isUsageLoading ? 'Loading activity data...' : 'No content generated yet in this period.'}
+              </div>
+            )}
           </div>
         </Card>
 
         {/* Platform Share Pie Chart */}
         <Card className="border-border bg-card rounded-2xl p-6 flex flex-col justify-between">
           <CardHeader className="px-0 pt-0">
-            <CardTitle className="text-base font-bold">Audience by Platform</CardTitle>
-            <CardDescription className="text-xs">Share of total engagement per network.</CardDescription>
+            <CardTitle className="text-base font-bold">Generations by Category</CardTitle>
+            <CardDescription className="text-xs">Breakdown of AI media output across modalities.</CardDescription>
           </CardHeader>
           <div className="h-56 w-full relative flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={platformShare} innerRadius={60} outerRadius={85} paddingAngle={4} dataKey="value">
-                  {platformShare.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <RechartsTooltip contentStyle={{ backgroundColor: '#1e1e24', borderRadius: '12px', fontSize: '12px' }} />
-              </PieChart>
-            </ResponsiveContainer>
+            {totalAIContent > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={displayPlatformShare} innerRadius={60} outerRadius={85} paddingAngle={4} dataKey="value">
+                    {displayPlatformShare.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px', fontSize: '12px' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="text-xs text-muted-foreground text-center">
+                No generated assets found yet.
+              </div>
+            )}
           </div>
           <div className="space-y-2 pt-2 border-t border-border">
-            {platformShare.slice(0, 3).map((item, idx) => (
+            {displayPlatformShare.map((item, idx) => (
               <div key={item.name} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[idx] }} />
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
                   <span className="text-muted-foreground">{item.name}</span>
                 </div>
-                <span className="font-bold text-foreground">{item.value}%</span>
+                <span className="font-bold text-foreground">{item.value.toLocaleString()}</span>
               </div>
             ))}
           </div>

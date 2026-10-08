@@ -208,6 +208,43 @@ describe('SchedulerService', () => {
       expect(mockQueue.add).toHaveBeenCalledTimes(3);
     });
 
+    it('should resolve local media URL to data URI and schedule post for LinkedIn', async () => {
+      mockPrisma.socialAccount.findFirst.mockResolvedValue({
+        id: 'acc-li-1',
+        userId: 'user-1',
+        platform: 'LinkedIn',
+        status: 'CONNECTED',
+      });
+
+      mockPrisma.generatedImage.findFirst.mockResolvedValue({
+        id: 'img-1',
+        userId: 'user-1',
+        url: '/generated/images/cmtvvydik000hln20kgophh96.png',
+        prompt: 'A futuristic cybernetic tiger prowling through a neon jungle',
+      });
+
+      mockPrisma.scheduledPost.create.mockImplementation(({ data }: any) => {
+        return Promise.resolve({
+          id: 'post-li-1',
+          ...data,
+          status: 'SCHEDULED',
+        });
+      });
+
+      const futureDate = new Date(Date.now() + 1000 * 60 * 60).toISOString();
+      const result = await service.createScheduledPost('user-1', {
+        socialAccountIds: ['acc-li-1'],
+        mediaAssetId: 'img-1',
+        mediaUrl: '/generated/images/cmtvvydik000hln20kgophh96.png',
+        caption: 'A futuristic cybernetic tiger prowling through a neon jungle',
+        scheduledAtUTC: futureDate,
+      });
+
+      expect(result.createdPosts).toHaveLength(1);
+      expect(result.createdPosts[0].mediaUrl).toMatch(/^data:image\/png;base64,/);
+      expect(mockQueue.add).toHaveBeenCalled();
+    });
+
     it('should reject post if mediaAssetId does not belong to authenticated user (IDOR security)', async () => {
       mockPrisma.socialAccount.findFirst.mockResolvedValue({
         id: 'acc-1',

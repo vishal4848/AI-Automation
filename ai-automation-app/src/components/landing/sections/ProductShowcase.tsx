@@ -1,11 +1,21 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
-import { Canvas } from '@react-three/fiber';
-import { Environment, Float, OrbitControls } from '@react-three/drei';
 import { CheckCircle2, Globe, Share2, Briefcase, PlayCircle } from 'lucide-react';
-import FloatingPanels from '@/components/landing/3d/FloatingPanels';
+
+const ProductShowcaseCanvas = dynamic(
+  () => import('@/components/landing/3d/ProductShowcaseCanvas'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xs">
+        Loading 3D preview...
+      </div>
+    ),
+  }
+);
 
 const featuresList = [
   "Cross-platform content generation",
@@ -85,17 +95,7 @@ export default function ProductShowcase() {
           {/* Right Side - 3D Canvas */}
           <div className="w-full lg:w-1/2 h-[500px] relative">
             <div className="absolute inset-0 bg-gradient-to-tr from-violet-500/10 to-cyan-500/10 rounded-3xl border border-white/[0.08] pointer-events-none" />
-            {mounted && (
-              <Canvas camera={{ position: [0, 0, 8], fov: 45 }} className="rounded-3xl w-full h-full">
-                <ambientLight intensity={0.5} />
-                <pointLight position={[10, 10, 10]} intensity={1} />
-                <Float speed={1.5} rotationIntensity={0.5} floatIntensity={1}>
-                  <FloatingPanels />
-                </Float>
-                <Environment preset="city" />
-                <OrbitControls enableZoom={false} autoRotate autoRotateSpeed={0.5} />
-              </Canvas>
-            )}
+            {mounted && <ProductShowcaseCanvas />}
           </div>
 
         </div>

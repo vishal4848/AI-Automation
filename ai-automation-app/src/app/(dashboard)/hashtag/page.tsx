@@ -12,36 +12,34 @@ export default function HashtagStudio() {
   const [count, setCount] = useState(30);
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState<{ trending: string[], niche: string[], branded: string[] } | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
   const handleGenerate = async () => {
-    if (!topic) return;
+    if (!topic.trim()) return;
     setIsGenerating(true);
     setResults(null);
+    setErrorMessage(null);
     try {
       const res = await fetch('/api/ai/generate-hashtags', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, platform, count }),
+        body: JSON.stringify({ topic: topic.trim(), platform, count }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        // Assuming API returns { trending: [], niche: [], branded: [] }
-        if (data.results) {
-          setResults(data.results);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        const parsedResults = data.hashtags || data.results;
+        if (parsedResults && (parsedResults.trending?.length || parsedResults.niche?.length || parsedResults.branded?.length)) {
+          setResults(parsedResults);
         } else {
-          // Mocking response if not structured correctly in backend yet
-          setResults({
-            trending: ['#ai', '#tech', '#innovation', '#future', '#software', '#coding', '#developer', '#startup'],
-            niche: ['#machinelearningdaily', '#webdevlife', '#nextjsdeveloper', '#reactjs', '#frontendmagic', '#backendengineering'],
-            branded: ['#OurBrandAI', '#BuildWithUs', '#AIAccelerator', '#TechSolutions2026']
-          });
+          setErrorMessage('No hashtags could be generated for this topic. Please try refining your keywords.');
         }
       } else {
-        alert('Failed to generate hashtags.');
+        const errorText = data.error || data.message || 'Failed to generate hashtags.';
+        setErrorMessage(errorText);
       }
-    } catch (error) {
-      alert('Error generating hashtags.');
+    } catch (error: any) {
+      setErrorMessage(error.message || 'Error communicating with AI generation service.');
     } finally {
       setIsGenerating(false);
     }
@@ -117,6 +115,12 @@ export default function HashtagStudio() {
           >
             {isGenerating ? 'Analyzing Algorithm...' : 'Generate Hashtags'}
           </button>
+
+          {errorMessage && (
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center">
+              {errorMessage}
+            </div>
+          )}
         </div>
       </div>
 

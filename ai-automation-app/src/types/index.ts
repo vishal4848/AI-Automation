@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'editor' | 'viewer';
+export type Role = 'USER' | 'ADMIN' | 'SUPER_ADMIN' | 'admin' | 'editor' | 'viewer';
 
 export interface User {
   id: string;
@@ -6,6 +6,7 @@ export interface User {
   email: string;
   avatarUrl?: string;
   role: Role;
+  credits?: number;
   createdAt: string;
 }
 

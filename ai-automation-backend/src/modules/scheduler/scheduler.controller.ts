@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { SchedulerService } from './scheduler.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -42,6 +42,22 @@ export class SchedulerController {
     @Param('id') postId: string,
   ) {
     const post = await this.schedulerService.getPostById(userId, postId);
+    return { success: true, data: post };
+  }
+
+  @Patch(['posts/:id', 'instagram/:id', 'facebook/:id', 'linkedin/:id'])
+  async updateScheduledPost(
+    @CurrentUser('id') userId: string,
+    @Param('id') postId: string,
+    @Body()
+    dto: {
+      caption?: string;
+      scheduledAtUTC?: string;
+      socialAccountId?: string;
+      mediaUrl?: string;
+    },
+  ) {
+    const post = await this.schedulerService.updateScheduledPost(userId, postId, dto);
     return { success: true, data: post };
   }
 

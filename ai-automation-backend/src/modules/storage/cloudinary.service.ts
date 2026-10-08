@@ -164,6 +164,54 @@ export class CloudinaryService {
     });
   }
 
+  async uploadFilePath(
+    filePath: string,
+    options: {
+      folder?: string;
+      resourceType?: 'image' | 'video' | 'auto';
+      fileName?: string;
+    } = {},
+  ): Promise<UploadResult> {
+    const resourceType = options.resourceType || 'auto';
+    const folder =
+      options.folder ||
+      (resourceType === 'video'
+        ? 'ai-automation/uploads/videos'
+        : 'ai-automation/uploads/images');
+
+    if (!this.configured) {
+      return {
+        url: `https://mock.cdn/uploads/${options.fileName || Date.now()}`,
+        secureUrl: `https://mock.cdn/uploads/${options.fileName || Date.now()}`,
+        publicId: `local-upload/${Date.now()}`,
+        resourceType: resourceType === 'video' ? 'video' : 'image',
+      };
+    }
+
+    try {
+      const result: UploadApiResponse = await cloudinary.uploader.upload(filePath, {
+        folder,
+        resource_type: resourceType,
+        public_id: options.fileName ? options.fileName.replace(/\.[^/.]+$/, '') : undefined,
+      });
+
+      return {
+        url: result.secure_url || result.url,
+        secureUrl: result.secure_url,
+        publicId: result.public_id,
+        width: result.width,
+        height: result.height,
+        format: result.format,
+        bytes: result.bytes,
+        duration: result.duration,
+        resourceType: (result.resource_type as any) || resourceType,
+      };
+    } catch (error: any) {
+      this.logger.error(`Cloudinary file path upload failed: ${error.message}`);
+      throw error;
+    }
+  }
+
   async deleteAsset(publicId: string, resourceType: 'image' | 'video' = 'image'): Promise<void> {
     if (!this.configured) return;
     try {

@@ -5,20 +5,20 @@ export const CustomCursor = () => {
   const dotRef = useRef<HTMLDivElement>(null);
   const ringRef = useRef<HTMLDivElement>(null);
   
-  const [isMobile, setIsMobile] = useState(true);
+  const [isFinePointer, setIsFinePointer] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
 
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.matchMedia('(pointer: coarse)').matches);
+    const checkFinePointer = () => {
+      setIsFinePointer(window.matchMedia('(pointer: fine)').matches);
     };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    checkFinePointer();
+    window.addEventListener('resize', checkFinePointer);
+    return () => window.removeEventListener('resize', checkFinePointer);
   }, []);
 
   useEffect(() => {
-    if (isMobile) return;
+    if (!isFinePointer) return;
 
     let mouseX = 0;
     let mouseY = 0;
@@ -64,9 +64,9 @@ export const CustomCursor = () => {
       window.removeEventListener('mousemove', onMouseMove);
       cancelAnimationFrame(animationFrameId);
     };
-  }, [isMobile]);
+  }, [isFinePointer]);
 
-  if (isMobile) return null;
+  if (!isFinePointer) return null;
 
   return (
     <>

@@ -32,6 +32,7 @@ describe('AssetsService', () => {
 
   const mockCloudinary = {
     uploadBuffer: jest.fn(),
+    uploadFilePath: jest.fn(),
     deleteAsset: jest.fn().mockResolvedValue(undefined),
   };
 
@@ -56,56 +57,56 @@ describe('AssetsService', () => {
   });
 
   describe('validateFile', () => {
-    it('1. should accept valid JPEG image under 10MB', () => {
+    it('1. should accept valid JPEG image under 10MB', async () => {
       const mockFile: any = {
         originalname: 'photo.jpg',
         mimetype: 'image/jpeg',
         size: 5 * 1024 * 1024,
         buffer: Buffer.from('fake-data'),
       };
-      const result = service.validateFile(mockFile);
+      const result = await service.validateFile(mockFile);
       expect(result.resourceType).toBe('image');
     });
 
-    it('2. should accept valid MP4 video under 100MB', () => {
+    it('2. should accept valid MP4 video under 100MB', async () => {
       const mockFile: any = {
         originalname: 'video.mp4',
         mimetype: 'video/mp4',
         size: 50 * 1024 * 1024,
         buffer: Buffer.from('fake-video'),
       };
-      const result = service.validateFile(mockFile);
+      const result = await service.validateFile(mockFile);
       expect(result.resourceType).toBe('video');
     });
 
-    it('3. should reject unsupported file type (.pdf, .exe)', () => {
+    it('3. should reject unsupported file type (.pdf, .exe)', async () => {
       const mockFile: any = {
         originalname: 'document.pdf',
         mimetype: 'application/pdf',
         size: 1024,
         buffer: Buffer.from('fake-pdf'),
       };
-      expect(() => service.validateFile(mockFile)).toThrow(BadRequestException);
+      await expect(service.validateFile(mockFile)).rejects.toThrow(BadRequestException);
     });
 
-    it('4. should reject image larger than 10MB', () => {
+    it('4. should reject image larger than 10MB', async () => {
       const mockFile: any = {
         originalname: 'large.png',
         mimetype: 'image/png',
         size: 11 * 1024 * 1024,
         buffer: Buffer.from('huge-image'),
       };
-      expect(() => service.validateFile(mockFile)).toThrow(BadRequestException);
+      await expect(service.validateFile(mockFile)).rejects.toThrow(BadRequestException);
     });
 
-    it('5. should reject video larger than 100MB', () => {
+    it('5. should reject video larger than 100MB', async () => {
       const mockFile: any = {
         originalname: 'huge-video.mp4',
         mimetype: 'video/mp4',
         size: 105 * 1024 * 1024,
         buffer: Buffer.from('huge-video'),
       };
-      expect(() => service.validateFile(mockFile)).toThrow(BadRequestException);
+      await expect(service.validateFile(mockFile)).rejects.toThrow(BadRequestException);
     });
   });
 

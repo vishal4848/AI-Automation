@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ConfigService } from '@nestjs/config';
 import { ScheduledPost, SocialAccount } from '@prisma/client';
 import { SocialPublisher } from './social-publisher.interface';
@@ -358,6 +360,32 @@ export class LinkedInPublisher implements SocialPublisher {
           contentType: match[1],
           buffer: Buffer.from(match[2], 'base64'),
         };
+      }
+    }
+
+    if (mediaUrl.startsWith('/')) {
+      const cleanPath = mediaUrl.split('?')[0].replace(/^\/+/, '');
+      const candidates = [
+        path.resolve(process.cwd(), '..', 'ai-automation-app', 'public', cleanPath),
+        path.resolve(process.cwd(), 'public', cleanPath),
+        path.resolve(__dirname, '../../../../ai-automation-app/public', cleanPath),
+      ];
+      for (const filePath of candidates) {
+        if (fs.existsSync(filePath)) {
+          const ext = path.extname(filePath).toLowerCase();
+          const mimeMap: Record<string, string> = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.webp': 'image/webp',
+            '.mp4': 'video/mp4',
+            '.mov': 'video/quicktime',
+          };
+          return {
+            contentType: mimeMap[ext] || 'application/octet-stream',
+            buffer: fs.readFileSync(filePath),
+          };
+        }
       }
     }
 

@@ -12,6 +12,9 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import * as os from 'os';
+import * as path from 'path';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AssetsService } from './assets.service';
@@ -23,7 +26,20 @@ export class AssetsController {
   constructor(private readonly assetsService: AssetsService) {}
 
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: os.tmpdir(),
+        filename: (req, file, cb) => {
+          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+        },
+      }),
+      limits: {
+        fileSize: 100 * 1024 * 1024, // 100MB max
+      },
+    }),
+  )
   async uploadAsset(
     @CurrentUser() user: any,
     @UploadedFile() file: any,

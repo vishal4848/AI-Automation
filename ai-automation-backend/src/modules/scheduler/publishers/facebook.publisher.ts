@@ -27,8 +27,8 @@ export class FacebookPublisher implements SocialPublisher {
     if (post.mediaUrl.includes('localhost') || post.mediaUrl.includes('127.0.0.1')) {
       throw new Error('FACEBOOK_MEDIA_INVALID: Localhost URLs cannot be accessed by Facebook. Please use a public Cloudinary URL.');
     }
-    if (!post.mediaUrl.startsWith('https://') && !post.mediaUrl.startsWith('http://')) {
-      throw new Error('FACEBOOK_MEDIA_INVALID: Media URL must be a valid public HTTPS link.');
+    if (!post.mediaUrl.startsWith('https://') && !post.mediaUrl.startsWith('http://') && !post.mediaUrl.startsWith('data:')) {
+      throw new Error('FACEBOOK_MEDIA_INVALID: Media URL must be a valid public HTTPS link or data URI.');
     }
     return true;
   }
@@ -53,15 +53,34 @@ export class FacebookPublisher implements SocialPublisher {
       if (isVideo) {
         // ─── PUBLISH VIDEO TO FACEBOOK PAGE ───
         const videoUrl = `https://graph.facebook.com/${version}/${pageId}/videos`;
-        const response = await fetch(videoUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            file_url: post.mediaUrl,
-            description: post.caption || '',
-            access_token: pageAccessToken,
-          }),
-        });
+        let response: Response;
+
+        if (post.mediaUrl.startsWith('data:')) {
+          const match = post.mediaUrl.match(/^data:([^;]+);base64,(.+)$/);
+          if (!match) {
+            throw new Error('FACEBOOK_MEDIA_INVALID: Malformed data URI.');
+          }
+          const contentType = match[1];
+          const buffer = Buffer.from(match[2], 'base64');
+          const formData = new FormData();
+          formData.append('source', new Blob([buffer], { type: contentType }), 'media-asset.mp4');
+          formData.append('description', post.caption || '');
+          formData.append('access_token', pageAccessToken);
+          response = await fetch(videoUrl, {
+            method: 'POST',
+            body: formData,
+          });
+        } else {
+          response = await fetch(videoUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              file_url: post.mediaUrl,
+              description: post.caption || '',
+              access_token: pageAccessToken,
+            }),
+          });
+        }
 
         const data = await response.json();
 
@@ -79,15 +98,34 @@ export class FacebookPublisher implements SocialPublisher {
       } else {
         // ─── PUBLISH PHOTO TO FACEBOOK PAGE ───
         const photoUrl = `https://graph.facebook.com/${version}/${pageId}/photos`;
-        const response = await fetch(photoUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: post.mediaUrl,
-            caption: post.caption || '',
-            access_token: pageAccessToken,
-          }),
-        });
+        let response: Response;
+
+        if (post.mediaUrl.startsWith('data:')) {
+          const match = post.mediaUrl.match(/^data:([^;]+);base64,(.+)$/);
+          if (!match) {
+            throw new Error('FACEBOOK_MEDIA_INVALID: Malformed data URI.');
+          }
+          const contentType = match[1];
+          const buffer = Buffer.from(match[2], 'base64');
+          const formData = new FormData();
+          formData.append('source', new Blob([buffer], { type: contentType }), 'media-asset.png');
+          formData.append('caption', post.caption || '');
+          formData.append('access_token', pageAccessToken);
+          response = await fetch(photoUrl, {
+            method: 'POST',
+            body: formData,
+          });
+        } else {
+          response = await fetch(photoUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: post.mediaUrl,
+              caption: post.caption || '',
+              access_token: pageAccessToken,
+            }),
+          });
+        }
 
         const data = await response.json();
 

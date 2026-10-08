@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { AIGatewayService } from '../ai-gateway/ai-gateway.service';
@@ -26,6 +28,7 @@ export class VideosService {
     private readonly notificationsService: NotificationsService,
     private readonly replicateProvider: ReplicateProvider,
     private readonly config: ConfigService,
+    @InjectQueue('video-generation') private readonly videoQueue: Queue,
   ) {}
 
   /**
@@ -44,7 +47,7 @@ export class VideosService {
 
   /**
    * Main video generation method.
-   * Non-blocking for long-running Replicate video generation.
+   * Atomically checks & deducts credits, creates DB record, and enqueues to BullMQ.
    */
   async generate(userId: string, dto: GenerateVideoDto) {
     const modelId = dto.model || 'wan-3';
@@ -54,44 +57,49 @@ export class VideosService {
       prompt: dto.prompt,
       duration: dto.duration,
       resolution: dto.resolution,
-      aspectRatio: dto.aspectRatio,
-      image: dto.inputImage,
     });
 
     if (!validation.valid) {
       throw new BadRequestException(validation.error);
     }
 
-    // Check user credits
+    // Atomically check and deduct user credits upfront
     const modelEntry = this.modelRegistry.getModel(modelId, dto.provider);
     const requiredCredits = modelEntry ? modelEntry.creditsPerGeneration : 20;
 
-    let userCredits = 100;
     try {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { credits: true },
-      });
-      if (user) {
-        userCredits = user.credits;
-        if (user.credits < requiredCredits) {
-          throw new BadRequestException(
-            `Insufficient credits. Required: ${requiredCredits}, available: ${user.credits}`,
-          );
-        }
-      }
+      await this.prisma.deductCreditsAtomically(
+        userId,
+        requiredCredits,
+        `Video generation with ${modelId}`,
+        'USAGE',
+        { model: modelId, provider: dto.provider },
+      );
     } catch (err: any) {
-      if (err instanceof BadRequestException) throw err;
+      if (err.message === 'INSUFFICIENT_CREDITS') {
+        throw new BadRequestException({
+          success: false,
+          code: 'INSUFFICIENT_CREDITS',
+          message: `Insufficient credits. Required: ${requiredCredits}.`,
+        });
+      }
+      throw err;
     }
 
     const isReplicate = this.isReplicateTarget(dto);
 
     if (isReplicate) {
       if (!this.replicateProvider.isAvailable()) {
+        // Refund credits if provider not configured
+        await this.prisma.refundCreditsAtomically(
+          userId,
+          requiredCredits,
+          `Refund: Replicate API token is not configured`,
+        ).catch(() => {});
         throw new BadRequestException(REPLICATE_ERRORS.NOT_CONFIGURED);
       }
 
-      // Create video record with PROCESSING status in DB
+      // Create video record with PENDING status in DB
       let savedVideo: any = null;
       try {
         savedVideo = await this.prisma.generatedVideo.create({
@@ -104,7 +112,7 @@ export class VideosService {
             duration: dto.duration || 5,
             resolution: dto.resolution || null,
             fps: dto.fps || null,
-            status: 'PROCESSING',
+            status: 'PENDING',
             creditsUsed: requiredCredits,
             metadata: {
               aspectRatio: dto.aspectRatio,
@@ -113,48 +121,78 @@ export class VideosService {
           },
         });
       } catch (dbErr: any) {
-        this.logger.warn(`DB save skipped during video start: ${dbErr.message}`);
-        savedVideo = {
-          id: `vid-${Date.now()}`,
+        this.logger.error(`DB save failed during video start: ${dbErr.message}`);
+        await this.prisma.refundCreditsAtomically(
           userId,
-          status: 'PROCESSING',
-          createdAt: new Date(),
-        };
+          requiredCredits,
+          `Refund: Database save failed`,
+        ).catch(() => {});
+        throw new BadRequestException('Failed to initiate video generation.');
       }
 
-      // Execute generation asynchronously without blocking the HTTP response
-      this.processReplicateVideoAsync(userId, savedVideo.id, dto).catch((err) => {
-        this.logger.error(`Async video generation error for ${savedVideo.id}: ${err.message}`);
-      });
+      // Dispatch to BullMQ queue for durable execution and retry
+      try {
+        await this.videoQueue.add(
+          'generate-video',
+          {
+            videoId: savedVideo.id,
+            userId,
+            dto,
+          },
+          {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5000 },
+            removeOnComplete: true,
+          },
+        );
+      } catch (queueErr: any) {
+        this.logger.warn(`BullMQ queue offline or Redis unavailable: ${queueErr.message}`);
+      }
 
-      // Return immediate response with processing status
       return {
         id: savedVideo.id,
-        status: 'PROCESSING',
+        status: 'PENDING',
         prompt: dto.prompt,
         model: modelId,
         provider: 'replicate',
         duration: dto.duration || 5,
-        message: 'Video generation started and is processing in the background.',
+        message: 'Video generation queued and is processing in the background.',
         createdAt: savedVideo.createdAt || new Date(),
       };
     }
 
-    // Existing fallback / synchronous video generation path (e.g. Fal or demo)
+    // Synchronous video generation path (e.g. Fal or demo)
     const start = Date.now();
-    const result = await this.aiGateway.generateVideo(
-      {
-        prompt: dto.prompt,
-        model: modelId,
-        duration: dto.duration,
-        resolution: dto.resolution,
-        fps: dto.fps,
-        style: dto.style,
-      },
-      { preferredProvider: dto.provider },
-    );
+    let result: any;
+    try {
+      result = await this.aiGateway.generateVideo(
+        {
+          prompt: dto.prompt,
+          model: modelId,
+          duration: dto.duration,
+          resolution: dto.resolution,
+          fps: dto.fps,
+          style: dto.style,
+        },
+        { preferredProvider: dto.provider },
+      );
+    } catch (err: any) {
+      await this.prisma.refundCreditsAtomically(
+        userId,
+        requiredCredits,
+        `Refund for failed video generation with ${modelId}`,
+        { error: err.message },
+      ).catch(() => {});
+      throw new BadRequestException(err.message || 'Video generation failed');
+    }
 
     if (!result.success || !result.data) {
+      await this.prisma.refundCreditsAtomically(
+        userId,
+        requiredCredits,
+        `Refund for failed video generation with ${modelId}`,
+        { error: result.error },
+      ).catch(() => {});
       throw new BadRequestException(result.error || 'Video generation failed');
     }
 
@@ -175,7 +213,7 @@ export class VideosService {
           cloudinaryId,
           duration: dto.duration || 5,
           status: 'COMPLETED',
-          creditsUsed: 15,
+          creditsUsed: requiredCredits,
           metadata: { demo: result.demo, latencyMs: result.latencyMs },
         },
       });
@@ -188,16 +226,10 @@ export class VideosService {
           provider: result.provider,
           model: modelId,
           category: 'VIDEO',
-          creditsUsed: 15,
+          creditsUsed: requiredCredits,
           generationMs: Date.now() - start,
           status: 'COMPLETED',
         },
-      });
-
-      // Deduct credits
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { credits: { decrement: 15 } },
       });
     } catch (dbErr: any) {
       this.logger.warn(`DB save skipped: ${dbErr.message}`);
@@ -215,100 +247,6 @@ export class VideosService {
       latencyMs: result.latencyMs,
       createdAt: savedVideo?.createdAt || new Date(),
     };
-  }
-
-  /**
-   * Asynchronous processor for Replicate video generation.
-   */
-  private async processReplicateVideoAsync(
-    userId: string,
-    videoId: string,
-    dto: GenerateVideoDto,
-  ) {
-    const start = Date.now();
-    try {
-      this.logger.log(`Starting Replicate video generation for videoId: ${videoId}`);
-      const result = await this.replicateProvider.generateVideo({
-        prompt: dto.prompt,
-        model: dto.model || 'wan-3',
-        duration: dto.duration,
-        resolution: dto.resolution,
-        aspectRatio: dto.aspectRatio,
-        inputImage: dto.inputImage,
-      });
-
-      if (!result.success || !result.data?.url) {
-        throw new Error(result.error || 'Replicate video generation failed');
-      }
-
-      this.logger.log(`Replicate video generated. Uploading to Cloudinary...`);
-      const upload = await this.cloudinary.uploadVideoUrl(result.data.url);
-      const finalUrl = upload.secureUrl || upload.url;
-      const cloudinaryId = upload.publicId;
-
-      // Update DB record to COMPLETED
-      try {
-        await this.prisma.generatedVideo.update({
-          where: { id: videoId },
-          data: {
-            url: finalUrl,
-            cloudinaryId,
-            status: 'COMPLETED',
-            duration: dto.duration || result.data.duration || 5,
-            metadata: {
-              latencyMs: Date.now() - start,
-              completedAt: new Date(),
-            },
-          },
-        });
-
-        // Record prompt history
-        await this.prisma.promptHistory.create({
-          data: {
-            userId,
-            originalPrompt: dto.prompt,
-            provider: 'replicate',
-            model: dto.model || 'wan-3',
-            category: 'VIDEO',
-            creditsUsed: 15,
-            generationMs: Date.now() - start,
-            status: 'COMPLETED',
-          },
-        });
-
-        // Deduct credits
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: { credits: { decrement: 15 } },
-        });
-
-        // Send real-time notification
-        await this.notificationsService.create(userId, {
-          type: 'VIDEO_GENERATED',
-          title: 'AI Video Generated',
-          message: `Your video "${dto.prompt.slice(0, 35)}..." is ready to view and schedule.`,
-          data: { videoId, url: finalUrl },
-        });
-
-        this.logger.log(`Replicate video completed and saved for videoId: ${videoId}`);
-      } catch (dbErr: any) {
-        this.logger.warn(`Failed to update DB for completed video ${videoId}: ${dbErr.message}`);
-      }
-    } catch (error: any) {
-      this.logger.error(`Replicate video processing failed for ${videoId}: ${error.message}`);
-      try {
-        await this.prisma.generatedVideo.update({
-          where: { id: videoId },
-          data: {
-            status: 'FAILED',
-            metadata: {
-              errorMessage: error.message,
-              failedAt: new Date(),
-            },
-          },
-        });
-      } catch {}
-    }
   }
 
   /**
@@ -406,6 +344,29 @@ export class VideosService {
 
     this.logger.log(`Received Replicate webhook for prediction ${predictionId}, status: ${status}`);
 
+    if (!predictionId) {
+      return { received: true, ignored: true };
+    }
+
+    const video = await this.prisma.generatedVideo.findFirst({
+      where: {
+        OR: [
+          { predictionId },
+          { jobId: predictionId },
+        ],
+      },
+    });
+
+    if (!video) {
+      this.logger.warn(`No video found matching predictionId: ${predictionId}`);
+      return { received: true, notFound: true };
+    }
+
+    // Idempotency: skip if already COMPLETED or CANCELLED
+    if (video.status === 'COMPLETED' || video.status === 'CANCELLED') {
+      return { received: true, alreadyHandled: true };
+    }
+
     if (status === 'succeeded' && output) {
       let videoUrl = '';
       if (Array.isArray(output) && output.length > 0) {
@@ -415,29 +376,55 @@ export class VideosService {
       }
 
       if (videoUrl) {
-        // Upload to Cloudinary and update matching video if found
         const upload = await this.cloudinary.uploadVideoUrl(videoUrl);
-        const video = await this.prisma.generatedVideo.findFirst({
-          where: {
-            OR: [
-              { jobId: predictionId },
-              { metadata: { path: ['predictionId'], equals: predictionId } },
-            ],
+        await this.prisma.generatedVideo.update({
+          where: { id: video.id },
+          data: {
+            url: upload.secureUrl || upload.url,
+            cloudinaryId: upload.publicId,
+            status: 'COMPLETED',
+            metadata: {
+              completedVia: 'webhook',
+              completedAt: new Date(),
+            },
           },
         });
 
-        if (video) {
-          await this.prisma.generatedVideo.update({
-            where: { id: video.id },
-            data: {
-              url: upload.secureUrl || upload.url,
-              cloudinaryId: upload.publicId,
-              status: 'COMPLETED',
-            },
-          });
-          this.logger.log(`Webhook updated video ${video.id} to COMPLETED`);
-        }
+        await this.notificationsService.create(video.userId, {
+          type: 'VIDEO_GENERATED',
+          title: 'AI Video Completed',
+          message: `Your video "${video.prompt.slice(0, 35)}..." is ready to view.`,
+          data: { videoId: video.id, url: upload.secureUrl || upload.url },
+        }).catch(() => {});
+
+        this.logger.log(`Webhook updated video ${video.id} to COMPLETED`);
       }
+    } else if (status === 'failed') {
+      await this.prisma.generatedVideo.update({
+        where: { id: video.id },
+        data: {
+          status: 'FAILED',
+          metadata: {
+            error: parsedBody?.error || 'Replicate prediction failed',
+            failedVia: 'webhook',
+          },
+        },
+      });
+
+      // Refund credits
+      await this.prisma.refundCreditsAtomically(
+        video.userId,
+        video.creditsUsed || 20,
+        `Refund for failed video generation (${video.prompt?.slice(0, 30)})`,
+        { videoId: video.id, error: parsedBody?.error },
+      ).catch(() => {});
+
+      await this.notificationsService.create(video.userId, {
+        type: 'VIDEO_FAILED',
+        title: 'Video Generation Failed',
+        message: `Failed to render video: ${parsedBody?.error || 'Prediction failed'}. Credits have been refunded.`,
+        data: { videoId: video.id },
+      }).catch(() => {});
     }
 
     return { received: true };

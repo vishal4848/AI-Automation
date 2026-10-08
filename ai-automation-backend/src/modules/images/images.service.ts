@@ -32,26 +32,27 @@ export class ImagesService {
       throw new BadRequestException(validation.error);
     }
 
-    // Check user credits
+    // Atomically check and deduct user credits before generation
     const modelEntry = this.modelRegistry.getModel(modelId, dto.provider);
     const requiredCredits = modelEntry ? modelEntry.creditsPerGeneration : 5;
 
-    let userCredits = 100;
     try {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { credits: true },
-      });
-      if (user) {
-        userCredits = user.credits;
-        if (user.credits < requiredCredits) {
-          throw new BadRequestException(
-            `Insufficient credits. Required: ${requiredCredits}, available: ${user.credits}`,
-          );
-        }
-      }
+      await this.prisma.deductCreditsAtomically(
+        userId,
+        requiredCredits,
+        `Generated image with ${modelId}`,
+        'USAGE',
+        { model: modelId, provider: dto.provider },
+      );
     } catch (err: any) {
-      if (err instanceof BadRequestException) throw err;
+      if (err.message === 'INSUFFICIENT_CREDITS') {
+        throw new BadRequestException({
+          success: false,
+          code: 'INSUFFICIENT_CREDITS',
+          message: `Insufficient credits. Required: ${requiredCredits}.`,
+        });
+      }
+      throw err;
     }
 
     const start = Date.now();
@@ -69,21 +70,38 @@ export class ImagesService {
 
     // Generate image via AI Gateway
     const refImage = dto.referenceImage || (dto.referenceImages ? dto.referenceImages[0] : undefined);
-    const result = await this.aiGateway.generateImage(
-      {
-        prompt: enhancedPrompt,
-        negativePrompt: dto.negativePrompt,
-        model: modelId,
-        style: dto.style,
-        ratio: dto.ratio,
-        steps: dto.steps,
-        referenceImage: refImage,
-        referenceImages: dto.referenceImages,
-      } as any,
-      { preferredProvider: dto.provider },
-    );
+    let result: any;
+    try {
+      result = await this.aiGateway.generateImage(
+        {
+          prompt: enhancedPrompt,
+          negativePrompt: dto.negativePrompt,
+          model: modelId,
+          style: dto.style,
+          ratio: dto.ratio,
+          steps: dto.steps,
+          referenceImage: refImage,
+          referenceImages: dto.referenceImages,
+        } as any,
+        { preferredProvider: dto.provider },
+      );
+    } catch (err: any) {
+      await this.prisma.refundCreditsAtomically(
+        userId,
+        requiredCredits,
+        `Refund for failed image generation with ${modelId}`,
+        { model: modelId, provider: dto.provider, error: err.message },
+      );
+      throw new BadRequestException(err.message || 'Image generation failed');
+    }
 
     if (!result.success || !result.data) {
+      await this.prisma.refundCreditsAtomically(
+        userId,
+        requiredCredits,
+        `Refund for failed image generation with ${modelId}`,
+        { model: modelId, provider: dto.provider, error: result.error },
+      );
       throw new BadRequestException(result.error || 'Image generation failed');
     }
 
@@ -139,25 +157,6 @@ export class ImagesService {
           status: 'COMPLETED',
         },
       });
-
-      // Deduct credits
-      if (requiredCredits > 0) {
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: { credits: { decrement: requiredCredits } },
-        });
-
-        await this.prisma.creditTransaction.create({
-          data: {
-            userId,
-            amount: -requiredCredits,
-            type: 'USAGE',
-            description: `Generated image with ${modelId}`,
-            balanceAfter: userCredits - requiredCredits,
-            metadata: { model: modelId, provider: result.provider },
-          },
-        }).catch(() => {});
-      }
 
       // Create live notification
       await this.notificationsService.create(userId, {

@@ -51,24 +51,24 @@ describe('SocialService', () => {
   });
 
   describe('getInstagramConnectUrl', () => {
-    it('should generate valid official Instagram Login page URL by default', () => {
+    it('should generate valid Meta Facebook OAuth dialog URL for Instagram Graph API by default', () => {
       const url = service.getInstagramConnectUrl('user-123');
 
-      expect(url).toContain('https://www.instagram.com/oauth/authorize');
+      expect(url).toContain('https://www.facebook.com/v20.0/dialog/oauth');
       expect(url).toContain('client_id=1234567890');
-      expect(url).toContain('scope=instagram_business_basic');
+      expect(url).toContain('scope=instagram_basic');
       expect(url).toContain('state=');
       // Verify state has payload and HMAC signature (contains a dot)
       const stateParam = new URL(url).searchParams.get('state');
       expect(stateParam).toContain('.');
     });
 
-    it('should generate valid Meta Facebook OAuth dialog URL when facebook flow is requested', () => {
-      const url = service.getInstagramConnectUrl('user-123', 'facebook');
+    it('should generate native Instagram OAuth URL when instagram flow is explicitly requested', () => {
+      const url = service.getInstagramConnectUrl('user-123', 'instagram');
 
-      expect(url).toContain('https://www.facebook.com/v20.0/dialog/oauth');
+      expect(url).toContain('https://www.instagram.com/oauth/authorize');
       expect(url).toContain('client_id=1234567890');
-      expect(url).toContain('scope=instagram_basic');
+      expect(url).toContain('scope=instagram_business_basic');
       expect(url).toContain('state=');
     });
 

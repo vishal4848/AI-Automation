@@ -20,8 +20,18 @@ export default function LandingPage() {
   useLenis();
 
   useEffect(() => {
-    document.body.style.cursor = 'none';
+    const mediaQuery = window.matchMedia('(pointer: fine)');
+    const updateCursor = () => {
+      if (mediaQuery.matches) {
+        document.body.style.cursor = 'none';
+      } else {
+        document.body.style.cursor = 'auto';
+      }
+    };
+    updateCursor();
+    mediaQuery.addEventListener('change', updateCursor);
     return () => {
+      mediaQuery.removeEventListener('change', updateCursor);
       document.body.style.cursor = 'auto';
     };
   }, []);

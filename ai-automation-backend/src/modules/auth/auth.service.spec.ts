@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 import { PrismaService } from '../../database/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { OtpService } from './otp.service';
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 
@@ -23,6 +24,11 @@ describe('AuthService', () => {
     signAsync: jest.fn().mockImplementation((payload) => Promise.resolve(`jwt_mock_token_${payload.sub}`)),
   };
 
+  const mockOtpService = {
+    generateAndSendOtp: jest.fn().mockResolvedValue({ success: true }),
+    verifyOtp: jest.fn().mockResolvedValue({ success: true }),
+  };
+
   const mockConfig = {
     get: jest.fn().mockImplementation((key: string) => {
       if (key === 'jwt.secret') return 'test-secret-key-min-32-chars-long';
@@ -40,6 +46,7 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: mockJwt },
         { provide: ConfigService, useValue: mockConfig },
+        { provide: OtpService, useValue: mockOtpService },
       ],
     }).compile();
 
