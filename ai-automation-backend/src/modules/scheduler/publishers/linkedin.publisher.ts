@@ -57,6 +57,9 @@ export class LinkedInPublisher implements SocialPublisher {
     }
 
     const authorUrn = this.resolveAuthorUrn(account);
+    if (accessToken.startsWith('direct_') || authorUrn.startsWith('direct_')) {
+      throw new Error('LINKEDIN_NOT_CONNECTED: This account does not have a valid LinkedIn access token. Please reconnect via OAuth or Access Token.');
+    }
     const hasMedia = Boolean(post.mediaUrl && post.mediaUrl.trim());
     const isVideo = hasMedia && this.isVideoUrl(post.mediaUrl);
 

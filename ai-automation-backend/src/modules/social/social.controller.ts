@@ -172,6 +172,7 @@ export class SocialController {
     return { success: true, message: `Successfully connected ${accounts.length} account(s).`, data: accounts };
   }
 
+
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Get(['accounts', 'instagram/accounts'])

@@ -26,7 +26,7 @@ export class InstagramPublisher implements SocialPublisher {
     if (post.mediaUrl.includes('localhost') || post.mediaUrl.includes('127.0.0.1')) {
       throw new Error('INSTAGRAM_MEDIA_INVALID: Localhost URLs cannot be accessed by Instagram. Please use a public Cloudinary URL.');
     }
-    if (!post.mediaUrl.startsWith('https://') && !post.mediaUrl.startsWith('http://')) {
+    if (post.mediaUrl && !post.mediaUrl.startsWith('https://') && !post.mediaUrl.startsWith('http://')) {
       throw new Error('INSTAGRAM_MEDIA_INVALID: Media URL must be a valid public HTTPS link.');
     }
     return true;
@@ -47,14 +47,18 @@ export class InstagramPublisher implements SocialPublisher {
 
     const igAccountId = account.platformUserId;
 
+    if (accessToken.startsWith('direct_') || igAccountId.startsWith('direct_')) {
+      throw new Error('INSTAGRAM_NOT_CONNECTED: This account does not have a valid Meta access token. Please reconnect via Access Token or OAuth.');
+    }
+
     // ─── STEP 1: CREATE MEDIA CONTAINER ───
     let creationId: string | null = null;
     let lastError: string | null = null;
 
-    // Try graph.instagram.com first (Instagram API with Instagram Login)
+    // Try graph.facebook.com first (primary for Meta Apps & Pages), then graph.instagram.com
     const hostEndpoints = [
-      `https://graph.instagram.com/${version}`,
       `https://graph.facebook.com/${version}`,
+      `https://graph.instagram.com/${version}`,
     ];
 
     let workingHost = hostEndpoints[0];
@@ -95,6 +99,12 @@ export class InstagramPublisher implements SocialPublisher {
           const errorCode = containerData.error.code;
           lastError = errorMsg;
 
+          // If there are more host endpoints to try, don't abort yet
+          if (host !== hostEndpoints[hostEndpoints.length - 1]) {
+            this.logger.warn(`Instagram container creation failed on ${host} (${errorMsg}), trying fallback...`);
+            continue;
+          }
+
           if (errorCode === 190) {
             throw new Error(`INSTAGRAM_TOKEN_EXPIRED: ${errorMsg}`);
           }
@@ -103,8 +113,10 @@ export class InstagramPublisher implements SocialPublisher {
           }
         }
       } catch (err: any) {
-        if (err.message.includes('INSTAGRAM_TOKEN_EXPIRED') || err.message.includes('INSTAGRAM_MEDIA_INVALID')) {
-          throw err;
+        if (host === hostEndpoints[hostEndpoints.length - 1]) {
+          if (err.message.includes('INSTAGRAM_TOKEN_EXPIRED') || err.message.includes('INSTAGRAM_MEDIA_INVALID')) {
+            throw err;
+          }
         }
         lastError = err.message;
       }

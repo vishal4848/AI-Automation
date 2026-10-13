@@ -44,12 +44,12 @@ export class SocialService {
     }
 
     // Default & Official for Meta Apps: Facebook OAuth dialog for Instagram Graph API
-    const fbScopes = [
+    const customScopes = this.configService.get<string>('META_INSTAGRAM_SCOPES');
+    const fbScopes = customScopes || [
       'instagram_basic',
       'instagram_content_publish',
       'pages_show_list',
       'pages_read_engagement',
-      'business_management',
       'public_profile',
     ].join(',');
     this.logger.log(`Meta Facebook OAuth URL for Instagram generated for client_id=${appId} with redirect_uri=${cleanRedirectUri}`);
@@ -85,14 +85,12 @@ export class SocialService {
     try {
       // 2. Exchange authorization code for short-lived access token
       const cleanCode = code ? code.replace(/#.*$/, '').trim() : code;
+      const flow = (this.configService.get<string>('INSTAGRAM_AUTH_FLOW') || 'instagram').toLowerCase();
 
-      // Exchange authorization code directly with graph.facebook.com (primary for Meta Apps)
-      const fbTokenUrl = `https://graph.facebook.com/${version}/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${encodeURIComponent(cleanCode)}`;
-      const fbRes = await fetch(fbTokenUrl);
-      let tokenData = await fbRes.json();
+      let tokenData: any = null;
 
-      // Fallback: If code was from api.instagram.com
-      if (!tokenData.access_token && tokenData.error) {
+      // When direct instagram flow is active, try api.instagram.com first
+      if (flow === 'instagram') {
         try {
           const tokenFormData = new URLSearchParams();
           tokenFormData.append('client_id', appId);
@@ -109,6 +107,58 @@ export class SocialService {
           const igData = await igRes.json();
           if (igData.access_token) {
             tokenData = igData;
+          } else if (Array.isArray(igData.data) && igData.data[0]?.access_token) {
+            tokenData = {
+              access_token: igData.data[0].access_token,
+              user_id: igData.data[0].user_id,
+            };
+          } else if (igData.error) {
+            this.logger.warn(`Instagram direct token exchange note: ${JSON.stringify(igData.error)}`);
+          }
+        } catch (igErr: any) {
+          this.logger.warn(`Instagram direct token exchange error: ${igErr.message}`);
+        }
+      }
+
+      // If not yet exchanged, try graph.facebook.com
+      if (!tokenData?.access_token) {
+        try {
+          const fbTokenUrl = `https://graph.facebook.com/${version}/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${encodeURIComponent(cleanCode)}`;
+          const fbRes = await fetch(fbTokenUrl);
+          const fbData = await fbRes.json();
+          if (fbData.access_token) {
+            tokenData = fbData;
+          } else if (!tokenData) {
+            tokenData = fbData;
+          }
+        } catch (fbErr: any) {
+          this.logger.warn(`Facebook token exchange error: ${fbErr.message}`);
+        }
+      }
+
+      // Final fallback to api.instagram.com if not already attempted
+      if (!tokenData?.access_token && flow !== 'instagram') {
+        try {
+          const tokenFormData = new URLSearchParams();
+          tokenFormData.append('client_id', appId);
+          tokenFormData.append('client_secret', appSecret);
+          tokenFormData.append('grant_type', 'authorization_code');
+          tokenFormData.append('redirect_uri', redirectUri);
+          tokenFormData.append('code', cleanCode);
+
+          const igRes = await fetch('https://api.instagram.com/oauth/access_token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: tokenFormData.toString(),
+          });
+          const igData = await igRes.json();
+          if (igData.access_token) {
+            tokenData = igData;
+          } else if (Array.isArray(igData.data) && igData.data[0]?.access_token) {
+            tokenData = {
+              access_token: igData.data[0].access_token,
+              user_id: igData.data[0].user_id,
+            };
           }
         } catch {}
       }
@@ -528,7 +578,38 @@ export class SocialService {
 
       const pages: any[] = pagesData.data || [];
       if (pages.length === 0) {
-        // Check if token is a direct Instagram token
+        // 1. Check if token is a direct Page Access Token with category and linked Instagram
+        try {
+          const directPageRes = await fetch(
+            `https://graph.facebook.com/${version}/me?fields=id,name,category,instagram_business_account{id,username}&access_token=${encodeURIComponent(cleanToken)}`,
+          );
+          const directPageData = await directPageRes.json();
+          if (directPageData.id && (directPageData.category || directPageData.instagram_business_account)) {
+            const encryptedToken = encrypt(cleanToken, encryptionKey);
+
+            const savedPage = await this.prisma.socialAccount.upsert({
+              where: { platform_platformUserId: { platform: 'Facebook', platformUserId: directPageData.id } },
+              update: { userId, pageId: directPageData.id, username: directPageData.name, accessTokenEncrypted: encryptedToken, status: 'CONNECTED' },
+              create: { userId, platform: 'Facebook', platformUserId: directPageData.id, pageId: directPageData.id, username: directPageData.name, accessTokenEncrypted: encryptedToken, status: 'CONNECTED' },
+            });
+            savedAccounts.push(savedPage);
+
+            if (directPageData.instagram_business_account?.id) {
+              const igId = directPageData.instagram_business_account.id;
+              const igUsername = directPageData.instagram_business_account.username || `${directPageData.name} (Instagram)`;
+              const savedIg = await this.prisma.socialAccount.upsert({
+                where: { platform_platformUserId: { platform: 'Instagram', platformUserId: igId } },
+                update: { userId, pageId: directPageData.id, username: igUsername, accessTokenEncrypted: encryptedToken, status: 'CONNECTED' },
+                create: { userId, platform: 'Instagram', platformUserId: igId, pageId: directPageData.id, username: igUsername, accessTokenEncrypted: encryptedToken, status: 'CONNECTED' },
+              });
+              savedAccounts.push(savedIg);
+            }
+
+            return savedAccounts;
+          }
+        } catch {}
+
+        // 2. Check if token is a direct Instagram token
         try {
           const igMeRes = await fetch(`https://graph.instagram.com/me?fields=id,username,account_type&access_token=${encodeURIComponent(cleanToken)}`);
           const igMeData = await igMeRes.json();
@@ -544,19 +625,9 @@ export class SocialService {
           }
         } catch {}
 
-        const meUrl = `https://graph.facebook.com/${version}/me?fields=id,name&access_token=${encodeURIComponent(cleanToken)}`;
-        const meRes = await fetch(meUrl);
-        const meData = await meRes.json();
-        if (meData.id) {
-          const encryptedToken = encrypt(cleanToken, encryptionKey);
-          const acc = await this.prisma.socialAccount.upsert({
-            where: { platform_platformUserId: { platform: 'Facebook', platformUserId: meData.id } },
-            update: { userId, pageId: meData.id, username: meData.name, accessTokenEncrypted: encryptedToken, status: 'CONNECTED' },
-            create: { userId, platform: 'Facebook', platformUserId: meData.id, pageId: meData.id, username: meData.name, accessTokenEncrypted: encryptedToken, status: 'CONNECTED' },
-          });
-          savedAccounts.push(acc);
-          return savedAccounts;
-        }
+        throw new BadRequestException(
+          'NO_PAGES_FOUND: No Facebook Pages or Instagram Professional accounts were found for this token. Meta API does not permit posting to personal profiles; it requires a Facebook Page or an Instagram Professional account connected to a Page. Please ensure your token has "pages_show_list", "pages_manage_posts", and "instagram_content_publish" permissions and that you have created a Facebook Page.',
+        );
       }
 
       for (const page of pages) {
@@ -885,4 +956,6 @@ export class SocialService {
 
     return { success: true, message: 'Account disconnected successfully.' };
   }
+
+
 }

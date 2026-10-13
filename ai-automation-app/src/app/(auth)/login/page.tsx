@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Eye, EyeOff, KeyRound, ArrowLeft, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, KeyRound, ArrowLeft, Loader2, ShieldCheck, Mail, Sparkles, CheckCircle2 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth-store';
 
 function LoginForm() {
@@ -11,6 +11,7 @@ function LoginForm() {
   const login = useAuthStore((state) => state.login);
 
   const [activeTab, setActiveTab] = useState<'login' | 'signup'>('login');
+  const [loginMethod, setLoginMethod] = useState<'password' | 'otp_only'>('password');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
 
@@ -23,6 +24,7 @@ function LoginForm() {
   // OTP Verification state
   const [isOtpStep, setIsOtpStep] = useState(false);
   const [otpCode, setOtpCode] = useState('');
+  const [otpPurpose, setOtpPurpose] = useState<'LOGIN' | 'REGISTRATION'>('LOGIN');
   const [otpNotice, setOtpNotice] = useState('');
   const [cooldown, setCooldown] = useState(0);
 
@@ -53,41 +55,81 @@ function LoginForm() {
     setErrorMessage('');
 
     try {
-      const endpoint = activeTab === 'login' ? '/api/auth/login' : '/api/auth/register';
-      const payload = activeTab === 'login' 
-        ? { email, password }
-        : { email, password, name: fullName };
+      if (activeTab === 'login') {
+        if (loginMethod === 'otp_only') {
+          // Passwordless OTP login
+          const res = await fetch('/api/auth/send-login-otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email.trim() }),
+          });
+          const data = await res.json().catch(() => ({}));
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+          if (!res.ok || !data.success) {
+            setErrorMessage(data.error || 'Failed to dispatch login verification code.');
+            return;
+          }
 
-      const text = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(text);
-      } catch {
-        setErrorMessage('Server returned an invalid response. Please verify backend service.');
-        return;
-      }
+          setIsOtpStep(true);
+          setOtpPurpose('LOGIN');
+          setOtpNotice(data.message || `A 6-digit login verification code was sent to ${email}.`);
+          setCooldown(60);
+          return;
+        }
 
-      if (!res.ok || (!data.success && !data.requiresOtp && !data.user)) {
-        setErrorMessage(data.error || data.message || 'Authentication failed. Please check your credentials.');
-        return;
-      }
+        // Standard 2-Step Login (Credentials -> OTP)
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim(), password }),
+        });
 
-      if (data.requiresOtp) {
-        setIsOtpStep(true);
-        setOtpNotice(data.message || `A 6-digit verification code has been dispatched to ${email}.`);
-        setCooldown(60);
-        return;
-      }
+        const data = await res.json().catch(() => ({}));
 
-      if (data.user) {
-        login(data.user);
-        router.push('/dashboard');
+        if (!res.ok || !data.success) {
+          setErrorMessage(data.error || data.message || 'Invalid email or password.');
+          return;
+        }
+
+        if (data.requiresOtp) {
+          setIsOtpStep(true);
+          setOtpPurpose('LOGIN');
+          setOtpNotice(data.message || `A 6-digit verification code has been dispatched to ${email}.`);
+          setCooldown(60);
+          return;
+        }
+
+        if (data.user) {
+          login(data.user);
+          window.location.href = '/dashboard';
+        }
+      } else {
+        // Sign Up
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim(), password, name: fullName.trim() }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.success) {
+          setErrorMessage(data.error || data.message || 'Registration failed. Please check inputs.');
+          return;
+        }
+
+        if (data.requiresOtp) {
+          setIsOtpStep(true);
+          setOtpPurpose('REGISTRATION');
+          setOtpNotice(data.message || `A confirmation code has been sent to ${email}.`);
+          setCooldown(60);
+          return;
+        }
+
+        if (data.user) {
+          login(data.user);
+          window.location.href = '/dashboard';
+        }
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Unable to connect to the authentication service.');
@@ -98,8 +140,9 @@ function LoginForm() {
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!otpCode.trim() || otpCode.trim().length !== 6) {
-      setErrorMessage('Please enter a valid 6-digit code.');
+    const cleanCode = otpCode.trim();
+    if (cleanCode.length !== 6) {
+      setErrorMessage('Please enter the full 6-digit verification code.');
       return;
     }
 
@@ -109,8 +152,13 @@ function LoginForm() {
       const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), code: otpCode.trim() }),
+        body: JSON.stringify({
+          email: email.trim(),
+          code: cleanCode,
+          purpose: otpPurpose,
+        }),
       });
+
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.success) {
@@ -121,9 +169,11 @@ function LoginForm() {
       if (data.user) {
         login(data.user);
       }
-      router.push('/dashboard');
+
+      // Hard redirect to ensure browser picks up cookies on next route load
+      window.location.href = '/dashboard';
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to verify verification code.');
+      setErrorMessage(err.message || 'Failed to verify OTP code.');
     } finally {
       setIsLoading(false);
     }
@@ -136,7 +186,7 @@ function LoginForm() {
       const res = await fetch('/api/auth/resend-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({ email: email.trim(), purpose: otpPurpose }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
@@ -212,13 +262,17 @@ function LoginForm() {
 
           {/* Title */}
           <h1 className="login-title">
-            {isOtpStep ? 'Verify Your Email' : activeTab === 'login' ? 'Welcome Back' : 'Create Account'}
+            {isOtpStep
+              ? otpPurpose === 'LOGIN' ? 'Verify Your Login' : 'Verify Your Email'
+              : activeTab === 'login' ? 'Welcome Back' : 'Create Account'}
           </h1>
           <p className="login-subtitle">
             {isOtpStep
-              ? 'Enter the 6-digit confirmation code dispatched to your inbox'
+              ? `Enter the 6-digit code dispatched to ${email || 'your email'}`
               : activeTab === 'login'
-              ? 'Enter your email and password to access your account'
+              ? (loginMethod === 'password'
+                  ? 'Sign in securely with email & password + OTP verification'
+                  : 'Instant login with email verification code')
               : 'Sign up to start automating your social media with AI'}
           </p>
 
@@ -242,6 +296,37 @@ function LoginForm() {
             </div>
           )}
 
+          {/* Login mode selector (Only in Login tab) */}
+          {!isOtpStep && activeTab === 'login' && (
+            <div className="flex items-center justify-between mb-4 px-1 text-xs">
+              <span className="text-muted-foreground font-medium">Login Method:</span>
+              <div className="inline-flex rounded-lg bg-zinc-900 border border-zinc-800 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setLoginMethod('password')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                    loginMethod === 'password'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Password + OTP
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoginMethod('otp_only')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                    loginMethod === 'otp_only'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Direct OTP (Passwordless)
+                </button>
+              </div>
+            </div>
+          )}
+
           {errorMessage && (
             <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', fontSize: '13px', marginBottom: '16px' }}>
               {errorMessage}
@@ -252,8 +337,9 @@ function LoginForm() {
             /* ─── OTP STEP FORM ─── */
             <form onSubmit={handleVerifyOtp}>
               {otpNotice && (
-                <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', fontSize: '13px', marginBottom: '16px' }}>
-                  {otpNotice}
+                <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', fontSize: '13px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShieldCheck className="w-4 h-4 shrink-0 text-sky-400" />
+                  <span>{otpNotice}</span>
                 </div>
               )}
 
@@ -262,7 +348,7 @@ function LoginForm() {
                 <input
                   type="text"
                   maxLength={6}
-                  className="form-input text-center font-mono tracking-widest text-lg"
+                  className="form-input text-center font-mono tracking-widest text-xl"
                   placeholder="000000"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
@@ -274,10 +360,10 @@ function LoginForm() {
               <div className="flex items-center justify-between mt-3 mb-5 text-xs text-muted-foreground">
                 <button
                   type="button"
-                  onClick={() => setIsOtpStep(false)}
+                  onClick={() => { setIsOtpStep(false); setOtpCode(''); }}
                   className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
                 >
-                  <ArrowLeft className="w-3.5 h-3.5" /> Back to form
+                  <ArrowLeft className="w-3.5 h-3.5" /> Back to edit details
                 </button>
                 <button
                   type="button"
@@ -290,7 +376,13 @@ function LoginForm() {
               </div>
 
               <button type="submit" className="submit-btn" disabled={isLoading || otpCode.length !== 6}>
-                {isLoading ? 'Verifying Code...' : 'Verify & Continue'}
+                {isLoading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Verifying Code...
+                  </span>
+                ) : (
+                  'Verify & Sign In'
+                )}
               </button>
             </form>
           ) : (
@@ -322,48 +414,64 @@ function LoginForm() {
                 />
               </div>
 
-              <div className="form-input-wrapper">
-                <label className="form-label">Password*</label>
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  className="form-input"
-                  placeholder="Enter Your Password..."
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  style={{ paddingRight: '44px' }}
-                />
-                <button
-                  type="button"
-                  className="password-toggle"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-
-              {/* Remember / Forgot */}
-              <div className="form-options">
-                <label className="remember-label">
+              {/* Password field is shown on signup or when password method is selected */}
+              {(activeTab === 'signup' || loginMethod === 'password') && (
+                <div className="form-input-wrapper">
+                  <label className="form-label">Password*</label>
                   <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
+                    type={showPassword ? 'text' : 'password'}
+                    className="form-input"
+                    placeholder="Enter Your Password..."
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    style={{ paddingRight: '44px' }}
                   />
-                  Remember me
-                </label>
-                <button
-                  type="button"
-                  onClick={() => { setShowForgotModal(true); setForgotEmail(email); setForgotStatus(null); }}
-                  className="forgot-link"
-                >
-                  Forgot Password?
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    className="password-toggle"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              )}
+
+              {/* Remember / Forgot (Shown in password mode) */}
+              {activeTab === 'login' && loginMethod === 'password' && (
+                <div className="form-options">
+                  <label className="remember-label">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                    />
+                    Remember me
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => { setShowForgotModal(true); setForgotEmail(email); setForgotStatus(null); }}
+                    className="forgot-link"
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+              )}
 
               {/* Submit */}
               <button type="submit" className="submit-btn" disabled={isLoading}>
-                {isLoading ? (activeTab === 'login' ? 'Signing in...' : 'Creating Account...') : (activeTab === 'login' ? 'Sign in' : 'Create Account')}
+                {isLoading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {activeTab === 'login'
+                      ? (loginMethod === 'otp_only' ? 'Sending Login Code...' : 'Verifying & Sending OTP...')
+                      : 'Creating Account...'}
+                  </span>
+                ) : activeTab === 'login' ? (
+                  loginMethod === 'otp_only' ? 'Send Login Code 🚀' : 'Sign in with Password & OTP'
+                ) : (
+                  'Create Account & Get Code'
+                )}
               </button>
             </form>
           )}

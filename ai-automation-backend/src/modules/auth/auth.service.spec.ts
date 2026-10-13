@@ -26,7 +26,9 @@ describe('AuthService', () => {
 
   const mockOtpService = {
     generateAndSendOtp: jest.fn().mockResolvedValue({ success: true }),
-    verifyOtp: jest.fn().mockResolvedValue({ success: true }),
+    sendOtp: jest.fn().mockResolvedValue({ success: true, message: 'OTP sent' }),
+    verifyOtp: jest.fn().mockResolvedValue(true),
+    maskEmail: jest.fn().mockReturnValue('te***@example.com'),
   };
 
   const mockConfig = {
@@ -57,7 +59,7 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    it('should successfully register a new user with hashed password and return tokens', async () => {
+    it('should successfully register a new user with hashed password and require OTP verification', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
       mockPrisma.user.create.mockResolvedValue({
         id: 'user-1',
@@ -76,8 +78,8 @@ describe('AuthService', () => {
       });
 
       expect(result.user.email).toBe('test@example.com');
-      expect(result.accessToken).toBeDefined();
-      expect(result.refreshToken).toBeDefined();
+      expect(result.requiresOtp).toBe(true);
+      expect(result.purpose).toBe('REGISTRATION');
       expect(mockPrisma.user.create).toHaveBeenCalled();
       // Ensure password stored was hashed, not plaintext
       const createCall = mockPrisma.user.create.mock.calls[0][0];
@@ -98,7 +100,30 @@ describe('AuthService', () => {
   });
 
   describe('login', () => {
-    it('should authenticate valid credentials and return user and tokens', async () => {
+    it('should authenticate valid credentials and dispatch OTP when code is not provided', async () => {
+      const hashedPassword = await bcrypt.hash('CorrectPassword123!', 12);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'test@example.com',
+        password: hashedPassword,
+        name: 'Test User',
+        isActive: true,
+        credits: 100,
+        role: 'USER',
+      });
+
+      const result = await service.login({
+        email: 'test@example.com',
+        password: 'CorrectPassword123!',
+      });
+
+      expect(result.requiresOtp).toBe(true);
+      expect(result.email).toBe('test@example.com');
+      expect(result.purpose).toBe('LOGIN');
+      expect(mockOtpService.sendOtp).toHaveBeenCalledWith('test@example.com', 'LOGIN');
+    });
+
+    it('should authenticate valid credentials with OTP code and return user and tokens', async () => {
       const hashedPassword = await bcrypt.hash('CorrectPassword123!', 12);
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
@@ -114,6 +139,7 @@ describe('AuthService', () => {
       const result = await service.login({
         email: 'test@example.com',
         password: 'CorrectPassword123!',
+        code: '123456',
       });
 
       expect(result.user.email).toBe('test@example.com');

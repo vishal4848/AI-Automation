@@ -47,6 +47,11 @@ export class FacebookPublisher implements SocialPublisher {
     }
 
     const pageId = account.pageId || account.platformUserId;
+
+    if (pageAccessToken.startsWith('direct_') || (pageId && pageId.startsWith('direct_'))) {
+      throw new Error('FACEBOOK_NOT_CONNECTED: This account does not have a valid Facebook Page access token. Please connect via Access Token or OAuth.');
+    }
+
     const isVideo = this.isVideoUrl(post.mediaUrl);
 
     try {
@@ -167,6 +172,9 @@ export class FacebookPublisher implements SocialPublisher {
 
     if (errorCode === 190) {
       throw new Error(`FACEBOOK_TOKEN_EXPIRED: ${errorMsg}`);
+    }
+    if (errorMsg.includes('publish_actions')) {
+      throw new Error(`FACEBOOK_PAGE_REQUIRED: Meta does not allow publishing to personal Facebook profiles. Please connect a Facebook Page to publish posts.`);
     }
     if (errorCode === 200 || errorCode === 10 || errorCode === 283 || errorSubcode === 458) {
       throw new Error(`FACEBOOK_PERMISSION_DENIED: ${errorMsg}`);

@@ -215,9 +215,13 @@ export default function SocialAccountsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 self-start">
-          <Button onClick={() => setIsTokenModalOpen(true)} variant="outline" className="rounded-xl gap-2 font-semibold text-xs border-primary/40 hover:bg-primary/5 text-primary shadow-sm">
+          <Button
+            onClick={() => setIsTokenModalOpen(true)}
+            variant="outline"
+            className="rounded-xl gap-2 font-semibold text-xs border-primary/40 hover:bg-primary/5 text-primary shadow-sm"
+          >
             <KeyRound className="w-4 h-4" />
-            <span>Connect via Token (Instant)</span>
+            <span>Connect via Token</span>
           </Button>
           <Button onClick={connectInstagram} className="bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white rounded-xl gap-2 font-semibold text-xs shadow-sm">
             <Plus className="w-4 h-4" />
@@ -255,7 +259,7 @@ export default function SocialAccountsPage() {
             <div className="flex flex-wrap justify-center items-center gap-3 mt-4">
               <Button onClick={() => setIsTokenModalOpen(true)} variant="default" size="sm" className="rounded-xl text-xs gap-1.5">
                 <KeyRound className="w-3.5 h-3.5" />
-                Connect via Access Token (Instant)
+                Connect via Access Token
               </Button>
               <Button onClick={connectInstagram} variant="outline" size="sm" className="rounded-xl text-xs">
                 <Plus className="w-3.5 h-3.5 mr-1" />
@@ -336,18 +340,22 @@ export default function SocialAccountsPage() {
         })}
       </div>
 
-      {/* Direct Token Connect Modal */}
+      {/* Direct Social Connect Modal */}
       {isTokenModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="relative w-full max-w-lg bg-card border border-border rounded-3xl p-6 shadow-2xl space-y-5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
                   <KeyRound className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-foreground">Connect via Access Token</h2>
-                  <p className="text-xs text-muted-foreground">Instant connection without OAuth login redirect or verification blocks</p>
+                  <h2 className="text-lg font-bold text-foreground">
+                    Connect via Access Token
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    Connect with a live Meta or LinkedIn OAuth token
+                  </p>
                 </div>
               </div>
               <button
@@ -385,8 +393,8 @@ export default function SocialAccountsPage() {
                   </a>
                 </div>
                 <ul className="list-disc list-inside space-y-1 text-[11px] leading-relaxed">
-                  <li><strong>Meta (Instagram / Facebook):</strong> Select your app in Graph Explorer, grant permissions (<code className="bg-background px-1 py-0.5 rounded">pages_manage_posts</code>, <code className="bg-background px-1 py-0.5 rounded">instagram_basic</code>), and click Generate Access Token.</li>
-                  <li><strong>LinkedIn:</strong> Generate a token with <code className="bg-background px-1 py-0.5 rounded">w_member_social</code> and <code className="bg-background px-1 py-0.5 rounded">openid profile</code> scopes, or use the <strong>Connect LinkedIn</strong> button directly.</li>
+                  <li><strong>Meta (Instagram / Facebook):</strong> Select your app in Graph Explorer, grant permissions (<code className="bg-background px-1 py-0.5 rounded">pages_show_list</code>), and click Generate Access Token.</li>
+                  <li><strong>LinkedIn:</strong> Generate a token with <code className="bg-background px-1 py-0.5 rounded">w_member_social</code> scopes.</li>
                 </ul>
               </div>
 

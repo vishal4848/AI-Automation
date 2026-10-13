@@ -134,13 +134,14 @@ export function Navbar() {
     setIsLoggingOut(true);
     try {
       await logout();
-      router.push('/login');
     } catch {
       useAuthStore.setState({ isAuthenticated: false, user: null });
-      router.push('/login');
     } finally {
       setIsLoggingOut(false);
       setIsProfileOpen(false);
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
     }
   };
 

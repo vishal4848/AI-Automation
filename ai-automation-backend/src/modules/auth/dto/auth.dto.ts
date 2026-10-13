@@ -19,6 +19,10 @@ export class LoginDto {
 
   @IsString()
   password: string;
+
+  @IsString()
+  @IsOptional()
+  code?: string;
 }
 
 export class RefreshTokenDto {

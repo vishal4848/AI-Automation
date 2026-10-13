@@ -23,10 +23,12 @@ export function MobileDrawer() {
   const { sidebarMobileOpen, toggleMobileSidebar } = useAppStore();
   const { user, logout } = useAuthStore();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
     toggleMobileSidebar();
-    router.push('/login');
+    await logout();
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
+    }
   };
 
   return (

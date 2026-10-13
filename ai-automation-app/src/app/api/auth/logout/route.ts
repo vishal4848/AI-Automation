@@ -9,7 +9,7 @@ export async function POST(req: Request) {
     await backendPost('/api/v1/auth/logout', {}, req).catch(() => {});
     const cookieStore = await cookies();
     cookieStore.set('auth_token', '', {
-      httpOnly: false,
+      httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',

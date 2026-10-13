@@ -46,21 +46,27 @@ export class AuthController {
   }
 
   @Public()
+  @Post('send-login-otp')
+  sendLoginOtp(@Body() dto: SendOtpDto) {
+    return this.authService.sendLoginOtp(dto.email);
+  }
+
+  @Public()
   @Post('send-otp')
   sendOtp(@Body() dto: SendOtpDto) {
-    return this.authService.sendOtp(dto.email, dto.purpose || 'REGISTRATION');
+    return this.authService.sendOtp(dto.email, dto.purpose || 'LOGIN');
   }
 
   @Public()
   @Post('verify-otp')
   verifyOtp(@Body() dto: VerifyOtpDto) {
-    return this.authService.verifyOtp(dto.email, dto.code, dto.purpose || 'REGISTRATION');
+    return this.authService.verifyOtp(dto.email, dto.code, dto.purpose || 'LOGIN');
   }
 
   @Public()
   @Post('resend-otp')
   resendOtp(@Body() dto: ResendOtpDto) {
-    return this.authService.sendOtp(dto.email, dto.purpose || 'REGISTRATION');
+    return this.authService.sendOtp(dto.email, dto.purpose || 'LOGIN');
   }
 
   @Public()

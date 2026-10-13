@@ -158,7 +158,17 @@ export function Sidebar() {
           )}
 
           {isOpen && (
-            <button onClick={() => logout()} className="p-2 text-muted-foreground hover:text-destructive transition-colors">
+            <button
+              type="button"
+              onClick={async () => {
+                await logout();
+                if (typeof window !== 'undefined') {
+                  window.location.href = '/login';
+                }
+              }}
+              title="Log Out"
+              className="p-2 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+            >
               <LogOut size={16} />
             </button>
           )}

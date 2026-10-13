@@ -60,14 +60,13 @@ export class AuthService {
       this.logger.warn(`Could not dispatch OTP on registration: ${err.message}`);
     }
 
-    const tokens = await this.generateTokens(user.id, user.email);
-    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 12);
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { refreshToken: hashedRefreshToken },
-    });
-
-    return { user, ...tokens, requiresOtp: true, message: 'Account created. Verification code sent to email.' };
+    return {
+      user,
+      requiresOtp: true,
+      purpose: 'REGISTRATION',
+      email: normalizedEmail,
+      message: `Account created. A 6-digit verification code has been dispatched to ${this.otpService.maskEmail(normalizedEmail)}.`,
+    };
   }
 
   async login(dto: LoginDto) {
@@ -90,36 +89,83 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
-    const tokens = await this.generateTokens(user.id, user.email);
-    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 12);
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { refreshToken: hashedRefreshToken },
-    });
-
-    const { password, refreshToken, ...safeUser } = user;
-    return { user: safeUser, ...tokens };
-  }
-
-  async sendOtp(email: string, purpose: string = 'REGISTRATION') {
-    return this.otpService.sendOtp(email, purpose);
-  }
-
-  async verifyOtp(email: string, code: string, purpose: string = 'REGISTRATION') {
-    await this.otpService.verifyOtp(email, code, purpose);
-    const normalizedEmail = email.toLowerCase().trim();
-    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
-    if (user) {
+    // If OTP code is already supplied in request, verify and complete login immediately
+    if (dto.code && dto.code.trim().length === 6) {
+      await this.otpService.verifyOtp(normalizedEmail, dto.code.trim(), 'LOGIN');
       const tokens = await this.generateTokens(user.id, user.email);
       const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 12);
       await this.prisma.user.update({
         where: { id: user.id },
         data: { refreshToken: hashedRefreshToken, isEmailVerified: true },
       });
+
       const { password, refreshToken, ...safeUser } = user;
-      return { success: true, message: 'Email verified successfully.', user: safeUser, ...tokens };
+      return { user: safeUser, ...tokens };
     }
-    return { success: true, message: 'Verification successful.' };
+
+    // Step 2: Trigger OTP for login verification
+    try {
+      await this.otpService.sendOtp(normalizedEmail, 'LOGIN');
+    } catch (err: any) {
+      this.logger.warn(`OTP dispatch notice for login (${normalizedEmail}): ${err.message}`);
+    }
+
+    return {
+      requiresOtp: true,
+      purpose: 'LOGIN',
+      email: normalizedEmail,
+      message: `A 6-digit login verification code has been sent to ${this.otpService.maskEmail(normalizedEmail)}. Please enter it to complete sign-in.`,
+    };
+  }
+
+  async sendLoginOtp(email: string) {
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user) {
+      throw new BadRequestException('No account found with this email. Please sign up first.');
+    }
+    if (!user.isActive) {
+      throw new UnauthorizedException('This account has been deactivated. Please contact support.');
+    }
+
+    await this.otpService.sendOtp(normalizedEmail, 'LOGIN');
+    return {
+      requiresOtp: true,
+      purpose: 'LOGIN',
+      email: normalizedEmail,
+      message: `A 6-digit login verification code has been dispatched to ${this.otpService.maskEmail(normalizedEmail)}.`,
+    };
+  }
+
+  async sendOtp(email: string, purpose: string = 'LOGIN') {
+    return this.otpService.sendOtp(email, purpose);
+  }
+
+  async verifyOtp(email: string, code: string, purpose: string = 'LOGIN') {
+    await this.otpService.verifyOtp(email, code, purpose);
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user) {
+      throw new UnauthorizedException('User account not found.');
+    }
+    if (!user.isActive) {
+      throw new UnauthorizedException('This account has been deactivated.');
+    }
+
+    const tokens = await this.generateTokens(user.id, user.email);
+    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 12);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { refreshToken: hashedRefreshToken, isEmailVerified: true },
+    });
+    const { password, refreshToken, ...safeUser } = user;
+    return {
+      success: true,
+      message: 'Verification successful. Logged in successfully.',
+      user: safeUser,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
   }
 
   async refresh(param1: string, param2?: string) {
