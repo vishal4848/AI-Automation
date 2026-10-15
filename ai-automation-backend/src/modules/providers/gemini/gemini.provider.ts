@@ -10,13 +10,22 @@ export class GeminiProvider implements AIProvider {
 
   constructor(private config: ConfigService) {}
 
+  private getToken(): string | undefined {
+    return (
+      this.config.get<string>('GEMINI_API_KEY') ||
+      this.config.get<string>('GOOGLE_AI_API_KEY') ||
+      this.config.get<string>('ai.gemini') ||
+      this.config.get<string>('ai.google')
+    );
+  }
+
   isAvailable(): boolean {
-    return !!this.config.get<string>('ai.gemini');
+    return !!this.getToken();
   }
 
   async generateImage(params: GenerateImageParams): Promise<AIProviderResponse<GeneratedImageResult>> {
     const start = Date.now();
-    const token = this.config.get<string>('ai.gemini');
+    const token = this.getToken();
 
     if (!token) {
       const fallbackUrl = getSvgFallbackImage(params.prompt, params.model || 'imagen-3', this.name);

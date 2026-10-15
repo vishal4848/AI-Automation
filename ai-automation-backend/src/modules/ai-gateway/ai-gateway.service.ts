@@ -32,7 +32,18 @@ export class AIGatewayService {
   ): Promise<AIProviderResponse<GeneratedImageResult>> {
     const { maxRetries = 2, enableFallback = true, preferredProvider } = options;
 
-    const provider = preferredProvider
+    const lowerModel = (params.model || '').toLowerCase();
+    const isReplicateTarget =
+      preferredProvider === 'replicate' ||
+      lowerModel.startsWith('replicate/') ||
+      lowerModel.includes('dall-e-3') ||
+      lowerModel.includes('chatgpt') ||
+      lowerModel.includes('imagen-3') ||
+      lowerModel.includes('google/');
+
+    const provider = isReplicateTarget
+      ? this.providerManager.getProvider('replicate') || this.providerManager.getProviderForModel(params.model)
+      : preferredProvider
       ? this.providerManager.getProvider(preferredProvider) ||
         this.providerManager.getProviderForModel(params.model)
       : this.providerManager.getProviderForModel(params.model);
@@ -65,11 +76,13 @@ export class AIGatewayService {
           return result;
         }
 
-        // Do not retry permanent errors
+        // Do not retry permanent errors or rate limits
         if (
           result.errorCode === 'PROVIDER_NOT_CONFIGURED' ||
           result.errorCode === 'REPLICATE_NOT_CONFIGURED' ||
           result.errorCode === 'REPLICATE_AUTH_FAILED' ||
+          result.errorCode === 'REPLICATE_PAYMENT_REQUIRED' ||
+          result.errorCode === 'REPLICATE_RATE_LIMITED' ||
           result.errorCode === 'REPLICATE_INVALID_INPUT' ||
           result.errorCode === 'REPLICATE_MODEL_NOT_FOUND' ||
           result.errorCode === 'QUOTA_EXCEEDED'
@@ -153,6 +166,8 @@ export class AIGatewayService {
           result.errorCode === 'PROVIDER_NOT_CONFIGURED' ||
           result.errorCode === 'REPLICATE_NOT_CONFIGURED' ||
           result.errorCode === 'REPLICATE_AUTH_FAILED' ||
+          result.errorCode === 'REPLICATE_PAYMENT_REQUIRED' ||
+          result.errorCode === 'REPLICATE_RATE_LIMITED' ||
           result.errorCode === 'REPLICATE_INVALID_INPUT' ||
           result.errorCode === 'REPLICATE_MODEL_NOT_FOUND'
         ) {

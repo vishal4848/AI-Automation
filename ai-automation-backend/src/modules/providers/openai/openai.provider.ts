@@ -5,7 +5,7 @@ import { AIProvider, GenerateImageParams, GenerateVideoParams, EnhancePromptPara
 @Injectable()
 export class OpenAIProvider implements AIProvider {
   readonly name = 'openai';
-  readonly supportedImageModels = ['dall-e-3', 'dall-e-2'];
+  readonly supportedImageModels = ['dall-e-3', 'dall-e-2', 'chatgpt', 'chatgpt-image'];
   readonly supportedVideoModels = [];
 
   constructor(private config: ConfigService) {}
@@ -17,9 +17,13 @@ export class OpenAIProvider implements AIProvider {
   async generateImage(params: GenerateImageParams): Promise<AIProviderResponse<GeneratedImageResult>> {
     const start = Date.now();
     const token = this.config.get<string>('ai.openai');
+    const targetModel =
+      params.model === 'chatgpt' || params.model === 'chatgpt-image'
+        ? 'dall-e-3'
+        : (params.model || 'dall-e-3');
 
     if (!token) {
-      const fallbackUrl = getSvgFallbackImage(params.prompt, params.model || 'dall-e-3', this.name);
+      const fallbackUrl = getSvgFallbackImage(params.prompt, targetModel, this.name);
       return {
         success: true,
         data: { url: fallbackUrl, base64: fallbackUrl, width: 1024, height: 1024, mimeType: 'image/svg+xml' },
@@ -35,7 +39,7 @@ export class OpenAIProvider implements AIProvider {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: params.model || 'dall-e-3',
+          model: targetModel,
           prompt: params.prompt,
           n: params.numImages || 1,
           size: '1024x1024',

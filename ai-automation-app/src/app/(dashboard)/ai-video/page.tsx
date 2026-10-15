@@ -73,7 +73,21 @@ export default function AIVideoStudio() {
         const data = await res.json();
         if (data.success && data.models?.length > 0) {
           setModels(data.models);
-          setSelectedModel(data.models[0].name);
+          const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+          const targetModel = urlParams?.get('model');
+          const targetProvider = urlParams?.get('provider');
+          const targetPrompt = urlParams?.get('prompt');
+          if (targetPrompt) {
+            setPrompt(targetPrompt);
+          }
+          if (targetModel && data.models.some((m: any) => m.name === targetModel)) {
+            setSelectedModel(targetModel);
+            if (targetProvider) {
+              setSelectedProvider(targetProvider.toLowerCase());
+            }
+          } else {
+            setSelectedModel(data.models[0].name);
+          }
         }
       } catch (err) {
         console.error('Failed to load video models:', err);

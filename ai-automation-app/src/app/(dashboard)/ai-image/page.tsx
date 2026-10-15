@@ -76,7 +76,21 @@ export default function AIImageStudio() {
         const data = await res.json();
         if (data.success && data.models?.length > 0) {
           setModels(data.models);
-          setSelectedModel(data.models[0].name);
+          const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+          const targetModel = urlParams?.get('model');
+          const targetProvider = urlParams?.get('provider');
+          const targetPrompt = urlParams?.get('prompt');
+          if (targetPrompt) {
+            setPrompt(targetPrompt);
+          }
+          if (targetModel && data.models.some((m: any) => m.name === targetModel)) {
+            setSelectedModel(targetModel);
+            if (targetProvider) {
+              setSelectedProvider(targetProvider.toLowerCase());
+            }
+          } else {
+            setSelectedModel(data.models[0].name);
+          }
         }
       } catch (err) {
         console.error('Failed to load models:', err);
@@ -147,9 +161,19 @@ export default function AIImageStudio() {
   const availableProviders = Array.from(new Set(models.map(m => (m.provider || '').toLowerCase()))).filter(Boolean);
 
   // Filter models by selected provider
-  const filteredModels = selectedProvider === 'all'
-    ? models
-    : models.filter(m => (m.provider || '').toLowerCase() === selectedProvider.toLowerCase());
+  const filteredModels = models.filter((m) => {
+    if (selectedProvider === 'all') return true;
+    const p = (m.provider || '').toLowerCase();
+    const n = (m.name || '').toLowerCase();
+    const dn = (m.displayName || '').toLowerCase();
+    if (selectedProvider === 'openai') {
+      return p === 'openai' || n.includes('openai') || n.includes('dall-e') || dn.includes('chatgpt');
+    }
+    if (selectedProvider === 'gemini') {
+      return p === 'gemini' || n.includes('google') || n.includes('gemini') || n.includes('imagen') || dn.includes('gemini');
+    }
+    return p === selectedProvider.toLowerCase();
+  });
 
   // Handle reference image upload
   const handleReferenceImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -529,7 +553,19 @@ export default function AIImageStudio() {
             onChange={(e) => {
               const prov = e.target.value;
               setSelectedProvider(prov);
-              const filtered = prov === 'all' ? models : models.filter((m) => (m.provider || '').toLowerCase() === prov.toLowerCase());
+              const filtered = models.filter((m) => {
+                if (prov === 'all') return true;
+                const p = (m.provider || '').toLowerCase();
+                const n = (m.name || '').toLowerCase();
+                const dn = (m.displayName || '').toLowerCase();
+                if (prov === 'openai') {
+                  return p === 'openai' || n.includes('openai') || n.includes('dall-e') || dn.includes('chatgpt');
+                }
+                if (prov === 'gemini') {
+                  return p === 'gemini' || n.includes('google') || n.includes('gemini') || n.includes('imagen') || dn.includes('gemini');
+                }
+                return p === prov.toLowerCase();
+              });
               if (filtered.length > 0 && !filtered.some((m) => m.name === selectedModel)) {
                 setSelectedModel(filtered[0].name);
               }
@@ -537,11 +573,16 @@ export default function AIImageStudio() {
             className="w-full p-2.5 rounded-xl bg-[#09090b] border border-white/[0.08] text-xs text-zinc-300 focus:border-violet-500 focus:outline-none transition-all capitalize"
           >
             <option value="all">All Providers</option>
-            {availableProviders.map((p) => (
-              <option key={p} value={p}>
-                {p === 'replicate' ? 'Replicate' : p.charAt(0).toUpperCase() + p.slice(1)}
-              </option>
-            ))}
+            <option value="replicate">Replicate</option>
+            <option value="openai">OpenAI / ChatGPT (Replicate)</option>
+            <option value="gemini">Google Gemini (Replicate)</option>
+            {availableProviders
+              .filter((p) => !['replicate', 'openai', 'gemini'].includes(p))
+              .map((p) => (
+                <option key={p} value={p}>
+                  {p.charAt(0).toUpperCase() + p.slice(1)}
+                </option>
+              ))}
           </select>
         </div>
 

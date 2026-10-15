@@ -15,6 +15,7 @@ export const validationSchema = Joi.object({
   HUGGINGFACE_API_TOKEN: Joi.string().optional().allow('').default(''),
   OPENAI_API_KEY: Joi.string().optional().allow('').default(''),
   GOOGLE_AI_API_KEY: Joi.string().optional().allow('').default(''),
+  GEMINI_API_KEY: Joi.string().optional().allow('').default(''),
   REPLICATE_API_TOKEN: Joi.string().optional().allow('').default(''),
   REPLICATE_IMAGE_MODEL: Joi.string().optional().allow('').default(''),
   REPLICATE_VIDEO_MODEL: Joi.string().optional().allow('').default(''),
@@ -43,7 +44,8 @@ export const configuration = () => ({
   ai: {
     huggingface: process.env.HUGGINGFACE_API_TOKEN || '',
     openai: process.env.OPENAI_API_KEY || '',
-    google: process.env.GOOGLE_AI_API_KEY || '',
+    google: process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || '',
+    gemini: process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || '',
     replicate: process.env.REPLICATE_API_TOKEN || '',
     replicateImageModel: process.env.REPLICATE_IMAGE_MODEL || '',
     replicateVideoModel: process.env.REPLICATE_VIDEO_MODEL || '',

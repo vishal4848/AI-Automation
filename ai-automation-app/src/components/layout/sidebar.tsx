@@ -20,7 +20,8 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-  Sparkles
+  Sparkles,
+  Layers
 } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { useAuthStore } from '@/store/auth-store';
@@ -35,6 +36,7 @@ export const NAV_ITEMS = {
   create: [
     { name: 'AI Image', href: '/ai-image', icon: ImageIcon },
     { name: 'AI Video', href: '/ai-video', icon: Video },
+    { name: 'AI Models', href: '/ai-models', icon: Layers },
     { name: 'AI Caption', href: '/ai-caption', icon: Type },
     { name: 'Hashtags', href: '/hashtag', icon: Hash },
     { name: 'Upload from Device', href: '/upload', icon: Upload },

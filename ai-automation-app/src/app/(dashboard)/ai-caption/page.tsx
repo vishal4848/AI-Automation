@@ -28,6 +28,14 @@ export default function AICaptionStudio() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [captions, setCaptions] = useState<string[]>([]);
 
+  React.useEffect(() => {
+    const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const urlTopic = urlParams?.get('topic') || urlParams?.get('prompt');
+    if (urlTopic) {
+      setTopic(urlTopic);
+    }
+  }, []);
+
   const handleGenerate = async () => {
     if (!topic) return;
     setIsGenerating(true);

@@ -573,4 +573,59 @@ describe('Replicate Provider & Integration Specification', () => {
     expect(result.id).toBeDefined();
     expect(result.provider).toBe('replicate');
   });
+
+  // 19. ChatGPT (DALL-E 3) on Replicate
+  it('19. should generate image using ChatGPT (openai/dall-e-3) via Replicate with sanitized parameters', async () => {
+    mockRun.mockReset();
+    mockRun.mockResolvedValueOnce(['https://replicate.delivery/pbxt/chatgpt_dalle3_out.png']);
+
+    const res = await provider.generateImage({
+      prompt: 'Isometric crystal terrarium with floating cosmos',
+      model: 'openai/dall-e-3',
+      ratio: '16:9',
+      style: 'vivid',
+      negativePrompt: 'blurry, dark',
+    } as any);
+
+    expect(res.success).toBe(true);
+    expect(res.data?.url).toBe('https://replicate.delivery/pbxt/chatgpt_dalle3_out.png');
+    expect(mockRun).toHaveBeenCalledWith(
+      'openai/dall-e-3',
+      expect.objectContaining({
+        input: {
+          prompt: 'Isometric crystal terrarium with floating cosmos',
+          aspect_ratio: '3:2',
+          style: 'vivid',
+        },
+      }),
+    );
+  });
+
+  // 20. Google Gemini (Imagen 3) on Replicate
+  it('20. should generate image using Google Gemini (google/imagen-3) via Replicate with sanitized parameters', async () => {
+    mockRun.mockReset();
+    mockRun.mockResolvedValueOnce(['https://replicate.delivery/pbxt/google_imagen3_out.jpg']);
+
+    const res = await provider.generateImage({
+      prompt: 'A cozy wooden cabin beside a turquoise alpine lake in the Swiss Alps',
+      model: 'google/imagen-3',
+      ratio: '16:9',
+      negativePrompt: 'low quality, artifacts',
+      referenceImage: 'https://example.com/ignored_for_t2i.png',
+    } as any);
+
+    expect(res.success).toBe(true);
+    expect(res.data?.url).toBe('https://replicate.delivery/pbxt/google_imagen3_out.jpg');
+    expect(mockRun).toHaveBeenCalledWith(
+      'google/imagen-3',
+      expect.objectContaining({
+        input: {
+          prompt: 'A cozy wooden cabin beside a turquoise alpine lake in the Swiss Alps',
+          aspect_ratio: '16:9',
+          output_format: 'jpg',
+        },
+      }),
+    );
+  });
 });
+

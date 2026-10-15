@@ -24,6 +24,7 @@ export interface EnhancePromptParams {
   prompt: string;
   category?: 'image' | 'video';
   style?: string;
+  model?: string;
 }
 
 export interface AIProviderResponse<T = any> {

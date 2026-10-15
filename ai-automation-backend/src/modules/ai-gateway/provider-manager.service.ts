@@ -61,6 +61,8 @@ export class ProviderManagerService {
 
     if (
       lower.startsWith('replicate/') ||
+      lower === 'openai/gpt-4o' ||
+      lower === 'openai/gpt-4o-mini' ||
       this.replicate.supportedImageModels.includes(lower) ||
       this.replicate.supportedVideoModels.includes(lower)
     ) {
@@ -70,7 +72,7 @@ export class ProviderManagerService {
     // Existing model routing
     if (['flux-schnell', 'flux-dev', 'sd3', 'sdxl'].includes(lower)) return this.hf;
     if (['wan-t2v', 'kling-video', 'luma-dream-machine'].includes(lower)) return this.fal;
-    if (['dall-e-3', 'dall-e-2'].includes(lower)) return this.openai;
+    if (['dall-e-2'].includes(lower)) return this.openai;
     if (['imagen-3', 'imagen-2'].includes(lower)) return this.gemini;
 
     // Default fallback
